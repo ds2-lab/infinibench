@@ -6,9 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/ScottMansfield/nanolog"
 	"github.com/go-redis/redis/v7"
 	infinicache "github.com/mason-leap-lab/infinicache/client"
-	"github.com/ScottMansfield/nanolog"
 	"io"
 	"io/ioutil"
 	"log"
@@ -21,6 +21,7 @@ import (
 	"time"
 	//"github.com/pkg/profile"
 
+	"github.com/dustin/go-humanize"
 	"github.com/wangaoone/redbench/benchclient"
 )
 
@@ -246,13 +247,14 @@ func Bench(
 						}
 						atomic.AddUint64(&totalPayload, uint64(len(buf)))
 					*/
-					atomic.AddUint64(&totalPayload, uint64(len(val)))
 					start := time.Now()
 					if opts.Op == 0 {
+						atomic.AddUint64(&totalPayload, uint64(len(val)))
 						cli.EcSet(key, val)
 					} else {
-						_, reader, ok := cli.EcGet(key)
-						if ok {
+						_, reader, _ := cli.EcGet(key)
+						if reader != nil {
+							atomic.AddUint64(&totalPayload, uint64(reader.Len()))
 							reader.Close() // By closing the reader, we save memory.
 						}
 					}
@@ -283,10 +285,10 @@ func Bench(
 	}
 	var die bool
 	for {
-		remaining := int(atomic.LoadInt64(&remaining))        // active clients
-		count := int(atomic.LoadUint64(&count))               // completed requests
-		real := time.Duration(atomic.LoadInt64(&tstop))       // real duration
-		totalPayload := int(atomic.LoadUint64(&totalPayload)) // size of all bytes sent
+		remaining := int(atomic.LoadInt64(&remaining))   // active clients
+		count := int(atomic.LoadUint64(&count))          // completed requests
+		real := time.Duration(atomic.LoadInt64(&tstop))  // real duration
+		totalPayload := atomic.LoadUint64(&totalPayload) // size of all bytes sent
 		more := remaining > 0
 		var realrps float64
 		if real > 0 {
@@ -301,9 +303,9 @@ func Bench(
 				fmt.Fprintf(opts.Stdout, " requests per second\n")
 			} else {
 				//fmt.Fprintf(opts.Stdout, "\r====== %s ======\n", name)
-				fmt.Fprintf(opts.Stdout, "  %d requests completed in %.2f seconds\n", opts.Requests, float64(real)/float64(time.Second))
+				fmt.Fprintf(opts.Stdout, "  %d requests completed in %.2f seconds\n", count, float64(real)/float64(time.Second))
 				fmt.Fprintf(opts.Stdout, "  %d parallel clients\n", opts.Clients)
-				fmt.Fprintf(opts.Stdout, "  %d bytes payload\n", totalPayload/opts.Requests)
+				fmt.Fprintf(opts.Stdout, "  %s bytes per second\n", humanize.Bytes(uint64(float64(totalPayload)/(float64(real)/float64(time.Second)))))
 				fmt.Fprintf(opts.Stdout, "  keep alive: 1\n")
 				fmt.Fprintf(opts.Stdout, "\n")
 				var limit time.Duration

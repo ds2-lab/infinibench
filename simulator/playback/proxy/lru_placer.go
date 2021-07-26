@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	syslog "log"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -64,7 +65,7 @@ func (lru *LRUPlacer) Remap(placements []uint64, obj *Object) []uint64 {
 
 				remapped.Done()
 			}
-		}(lru.backend.NewMeta(obj.Key, int64(obj.Size), obj.DChunks, obj.PChunks, i, int64(obj.ChunkSz), uint64(placements[i]), SLICE_SIZE))
+		}(lru.backend.NewMeta(obj.Key, strconv.FormatUint(obj.Size, 10), obj.DChunks, obj.PChunks, i, int64(obj.ChunkSz), uint64(placements[i]), SLICE_SIZE))
 	}
 
 	remapped.Wait()
