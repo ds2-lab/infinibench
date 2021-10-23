@@ -6,9 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/go-redis/redis/v7"
-	infinicache "github.com/mason-leap-lab/infinicache/client"
-	"github.com/ScottMansfield/nanolog"
 	"io"
 	"io/ioutil"
 	"log"
@@ -19,6 +16,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/ScottMansfield/nanolog"
+	"github.com/go-redis/redis/v8"
+	infinicache "github.com/mason-leap-lab/infinicache/client"
+
 	//"github.com/pkg/profile"
 
 	"github.com/wangaoone/redbench/benchclient"
