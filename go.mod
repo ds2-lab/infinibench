@@ -13,7 +13,7 @@ require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/client9/misspell v0.3.4 // indirect
 	github.com/dustin/go-humanize v1.0.0
-	github.com/go-redis/redis/v8 v8.11.4
+	github.com/go-redis/redis/v7 v7.2.0
 	github.com/google/uuid v1.1.1
 	github.com/gordonklaus/ineffassign v0.0.0-20200309095847-7953dde2c7bf // indirect
 	github.com/jgautheron/goconst v0.0.0-20200227150835-cda7ea3bf591 // indirect
