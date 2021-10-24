@@ -1,7 +1,7 @@
 package benchclient
 
 import (
-	"github.com/go-redis/redis/v7"
+	"github.com/go-redis/redis"
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
