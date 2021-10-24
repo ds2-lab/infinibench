@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/ScottMansfield/nanolog"
-	"github.com/go-redis/redis"
+	"github.com/go-redis/redis/v8"
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 
 	//"github.com/pkg/profile"

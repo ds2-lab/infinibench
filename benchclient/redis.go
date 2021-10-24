@@ -1,7 +1,9 @@
 package benchclient
 
 import (
-	"github.com/go-redis/redis"
+	"context"
+
+	"github.com/go-redis/redis/v8"
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
@@ -53,6 +55,7 @@ var (
 type Redis struct {
 	*defaultClient
 	backend redis.UniversalClient
+	ctx     context.Context
 }
 
 func NewRedis(addr string) *Redis {
@@ -88,11 +91,11 @@ func NewElasticCache() *Redis {
 }
 
 func (r *Redis) set(key string, val []byte) (err error) {
-	return r.backend.Set(key, val, 0).Err()
+	return r.backend.Set(r.ctx, key, val, 0).Err()
 }
 
 func (r *Redis) get(key string) (infinicache.ReadAllCloser, error) {
-	val, err := r.backend.Get(key).Bytes()
+	val, err := r.backend.Get(r.ctx, key).Bytes()
 	if err != nil {
 		return nil, err
 	} else {
@@ -107,6 +110,7 @@ func (r *Redis) Close() {
 	}
 }
 
-func (r *Redis) getClusterSlots() ([]redis.ClusterSlot, error) {
+func (r *Redis) getClusterSlots(ctx context.Context) ([]redis.ClusterSlot, error) {
+	r.ctx = ctx
 	return AWSElasticCacheCluster()
 }
