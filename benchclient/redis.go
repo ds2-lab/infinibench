@@ -1,7 +1,9 @@
 package benchclient
 
 import (
-	"github.com/go-redis/redis/v7"
+	"context"
+
+	"github.com/go-redis/redis/v8"
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
@@ -53,6 +55,7 @@ var (
 type Redis struct {
 	*defaultClient
 	backend redis.UniversalClient
+	ctx     context.Context
 }
 
 func NewRedis(addr string) *Redis {
@@ -67,7 +70,8 @@ func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
 	//client := newSession(addr)
 	client := &Redis{
 		defaultClient: newDefaultClient("Redis: "),
-		backend: backend,
+		backend:       backend,
+		ctx:           context.Background(),
 	}
 	client.setter = client.set
 	client.getter = client.get
@@ -75,18 +79,24 @@ func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
 }
 
 func NewElasticCache() *Redis {
-	return NewRedisWithBackend(redis.NewClusterClient(&redis.ClusterOptions{
-		ClusterSlots:  AWSElasticCacheCluster,
+	client := &Redis{
+		defaultClient: newDefaultClient("Redis: "),
+	}
+	client.backend = redis.NewClusterClient(&redis.ClusterOptions{
+		ClusterSlots:  client.getClusterSlots,
 		RouteRandomly: true,
-	}))
+	})
+	client.setter = client.set
+	client.getter = client.get
+	return client
 }
 
 func (r *Redis) set(key string, val []byte) (err error) {
-	return r.backend.Set(key, val, 0).Err()
+	return r.backend.Set(r.ctx, key, val, 0).Err()
 }
 
 func (r *Redis) get(key string) (infinicache.ReadAllCloser, error) {
-	val, err := r.backend.Get(key).Bytes()
+	val, err := r.backend.Get(r.ctx, key).Bytes()
 	if err != nil {
 		return nil, err
 	} else {
@@ -99,4 +109,9 @@ func (r *Redis) Close() {
 		r.backend.Close()
 		r.backend = nil
 	}
+}
+
+func (r *Redis) getClusterSlots(ctx context.Context) ([]redis.ClusterSlot, error) {
+	r.ctx = ctx
+	return AWSElasticCacheCluster()
 }
