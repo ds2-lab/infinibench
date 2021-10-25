@@ -71,6 +71,7 @@ func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
 	client := &Redis{
 		defaultClient: newDefaultClient("Redis: "),
 		backend:       backend,
+		ctx:           context.Background(),
 	}
 	client.setter = client.set
 	client.getter = client.get
