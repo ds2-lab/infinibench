@@ -13,6 +13,7 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-redis/redis/v8 v8.11.4
 	github.com/google/uuid v1.2.0
+	github.com/mason-leap-lab/go-utils v1.2.2 // indirect
 	github.com/mason-leap-lab/infinicache v1.0.1
 	github.com/zhangjyr/hashmap v1.0.2
 )

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/mason-leap-lab/go-utils/mapreduce"
 	"github.com/mason-leap-lab/infinicache/proxy/lambdastore"
 	"github.com/mason-leap-lab/infinicache/proxy/server/cluster"
 	"github.com/mason-leap-lab/infinicache/proxy/server/metastore"
@@ -19,7 +20,7 @@ type LRUPlacer struct {
 	queues  []chan interface{}
 
 	served    sync.WaitGroup
-	instances []*lambdastore.Instance
+	instances []*cluster.GroupInstance
 	sliceBase uint64
 }
 
@@ -115,8 +116,8 @@ func (lru *LRUPlacer) dropEvicted(meta *metastore.Meta) {
 }
 
 // metastore.ClusterManager implementation
-func (lru *LRUPlacer) GetActiveInstances(int) []*lambdastore.Instance {
-	return lru.instances
+func (lru *LRUPlacer) GetActiveInstances(int) lambdastore.InstanceEnumerator {
+	return cluster.NewGroupInstanceEnumerator(lru.instances)
 }
 
 func (lru *LRUPlacer) GetSlice(size int) metastore.Slice {
@@ -128,14 +129,18 @@ func (lru *LRUPlacer) Trigger(int, ...interface{}) {
 }
 
 func (lru *LRUPlacer) Instance(id uint64) *lambdastore.Instance {
-	return lru.instances[id]
+	return lru.instances[id].Instance()
 }
 
 func (lru *LRUPlacer) Recycle(ins types.LambdaDeployment) error {
 	return cluster.ErrUnsupported
 }
 
-func (lru *LRUPlacer) GetCandidateQueue() <-chan *lambdastore.Instance {
+func (lru *LRUPlacer) GetBackupCandidates() mapreduce.Iterator {
+	return nil
+}
+
+func (lru *LRUPlacer) GetDelegates() []*lambdastore.Instance {
 	return nil
 }
 
