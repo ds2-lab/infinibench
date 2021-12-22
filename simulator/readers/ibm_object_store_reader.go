@@ -8,7 +8,6 @@ import (
 	"io"
 	"regexp"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -34,7 +33,6 @@ type IBMObjectStoreReader struct {
 	cursor  int
 	// incompleted map[string]*fragmentTracer
 	// incompletedSeen int
-	pool *sync.Pool
 }
 
 func NewIBMObjectStoreReader(rd io.Reader) *IBMObjectStoreReader {
@@ -42,11 +40,6 @@ func NewIBMObjectStoreReader(rd io.Reader) *IBMObjectStoreReader {
 		BaseReader: NewBaseReader(),
 		backend:    csv.NewReader(bufio.NewReader(rd)),
 		// incompleted: make(map[string]*fragmentTracer, 100),
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return &Record{}
-			},
-		},
 	}
 	reader.backend.Comma = ' '          // Space separated.
 	reader.backend.FieldsPerRecord = -1 // Variable number of fields.

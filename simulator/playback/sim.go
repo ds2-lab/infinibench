@@ -316,7 +316,7 @@ func main() {
 	flag.BoolVar(&options.Balance, "balance", false, "enable balancer on dryrun")
 	flag.IntVar(&options.Concurrency, "c", 100, "max concurrency allowed, minimum 1.")
 	flag.Int64Var(&options.Bandwidth, "w", 0, "unit bandwidth per shard in MiB/s. 0 for unlimited bandwidth")
-	flag.StringVar(&options.TraceName, "trace", "IBMDockerRegistry", "type of trace: IBMDockerRegistry, IBMObjectStore")
+	flag.StringVar(&options.TraceName, "trace", "IBMDockerRegistry", "type of trace: IBMDockerRegistry, IBMObjectStore, AzureFunctions")
 	flag.Uint64Var(&options.SampleFractions, "sf", 1, "enable sampling by raising fraction's denominator.")
 	flag.Uint64Var(&options.SampleKey, "sk", 0, "the key of sample")
 	flag.Uint64Var(&options.FunctionCapacity, "fc", 0, "specify the capacity of functions")
@@ -403,6 +403,8 @@ func main() {
 	switch strings.ToLower(options.TraceName) {
 	case "ibmobjectstore":
 		reader = readers.NewIBMObjectStoreReader(traceFile)
+	case "azurefunctions":
+		reader = readers.NewAzureFunctionsReader(traceFile)
 	default:
 		reader = readers.NewIBMDockerRegistryReader(traceFile)
 	}
