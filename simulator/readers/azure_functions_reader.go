@@ -48,7 +48,7 @@ func (reader *AzureFunctionsReader) Read() (*Record, error) {
 	rec, _ := reader.BaseReader.Read()
 	reader.cursor++
 
-	rec.Key = reader.readField(line, "AnonBlobName")
+	rec.Key = reader.readField(line, "AnonBlobETag")
 	sz, szErr := strconv.ParseFloat(reader.readField(line, "BlobBytes"), 64)
 	if szErr == nil {
 		rec.Size = uint64(sz)
