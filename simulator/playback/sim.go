@@ -479,11 +479,11 @@ func main() {
 		}
 
 		obj := &proxy.Object{Record: rec}
-		if obj.Size > options.MaxSz {
-			obj.Size = options.MaxSz
-		}
 		if obj.Size > options.ScaleFrom {
 			obj.Size = uint64(float64(obj.Size) * options.ScaleSz)
+		}
+		if obj.Size > options.MaxSz {
+			obj.Size = options.MaxSz
 		}
 		obj.DChunks = options.Datashard
 		obj.PChunks = options.Parityshard
