@@ -18,13 +18,18 @@ var (
 				numSlots = 16384
 			}
 			slots := make([]redis.ClusterSlot, nodes)
-			slotStep := int(math.Ceil(float64(numSlots) / float64(nodes)))
+			slotStep := int(math.Floor(float64(numSlots) / float64(nodes)))
+			remainder := numSlots - slotStep*nodes
+			next := 0
 			for i := 0; i < nodes; i++ {
-				slots[i].Start = i * slotStep
-				slots[i].End = (i+1)*slotStep - 1
-				if slots[i].End >= numSlots {
-					slots[i].End = numSlots - 1
+				bonus := 0
+				if remainder > 0 {
+					bonus = 1
+					remainder--
 				}
+				slots[i].Start = next
+				slots[i].End = slots[i].Start + slotStep + bonus - 1
+				next = slots[i].End + 1
 				slots[i].Nodes = []redis.ClusterNode{{
 					Addr: fmt.Sprintf(addrPattern, i+1),
 				}}
