@@ -3,6 +3,7 @@ package benchclient
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 
 	"github.com/go-redis/redis/v8"
@@ -17,7 +18,7 @@ var (
 				numSlots = 16384
 			}
 			slots := make([]redis.ClusterSlot, nodes)
-			slotStep := int(math.Round(float64(numSlots) / float64(nodes)))
+			slotStep := int(math.Ceil(float64(numSlots) / float64(nodes)))
 			for i := 0; i < nodes; i++ {
 				slots[i].Start = i * slotStep
 				slots[i].End = (i+1)*slotStep - 1
@@ -28,6 +29,7 @@ var (
 					Addr: fmt.Sprintf(addrPattern, i+1),
 				}}
 			}
+			log.Println(slots)
 			return slots, nil
 		}
 	}
