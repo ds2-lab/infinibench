@@ -12,7 +12,12 @@ import (
 
 var (
 	GenElasticCacheCluster = func(addrPattern string, nodes int, numSlots int) RedisClusterSlotsProvider {
+		var cached []redis.ClusterSlot
 		return func(ctx context.Context) ([]redis.ClusterSlot, error) {
+			if cached != nil {
+				return cached, nil
+			}
+
 			if numSlots == 0 {
 				numSlots = 16384
 			}
@@ -33,8 +38,9 @@ var (
 					Addr: fmt.Sprintf(addrPattern, i+1),
 				}}
 			}
-			log.Println(slots)
-			return slots, nil
+			cached = slots
+			log.Printf("Confirmed redis cluster slots: %v", cached)
+			return cached, nil
 		}
 	}
 )
