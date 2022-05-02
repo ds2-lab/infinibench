@@ -98,7 +98,7 @@ type Options struct {
 	Skip             int64
 	S3               string
 	Redis            string
-	RedisCluster     bool
+	RedisCluster     int
 	Dummy            bool
 	Balance          bool
 	Concurrency      int
@@ -321,8 +321,8 @@ func main() {
 	flag.Int64Var(&options.LimitHour, "limitHour", 0, "limit to play N hours only")
 	flag.Int64Var(&options.Skip, "skip", 0, "skip N records")
 	flag.StringVar(&options.S3, "s3", "", "s3 bucket for enable s3 simulation")
-	flag.StringVar(&options.Redis, "redis", "", "Redis for enable Redis simulation")
-	flag.BoolVar(&options.RedisCluster, "redisCluster", false, "redisCluster for enable Redis simulation")
+	flag.StringVar(&options.Redis, "redis", "", "Redis address for enable Redis simulation")
+	flag.IntVar(&options.RedisCluster, "redisCluster", 1, "The number of nodes in the redis cluster. Set larger than 1 to enable Redis cluster")
 	flag.BoolVar(&options.Dummy, "dummy", false, "using Dummy client for simulation")
 	flag.BoolVar(&options.Balance, "balance", false, "enable balancer on dryrun")
 	flag.IntVar(&options.Concurrency, "c", 100, "max concurrency allowed, minimum 1.")
@@ -392,9 +392,11 @@ func main() {
 			if options.S3 != "" {
 				cli = benchclient.NewS3(options.S3)
 			} else if options.Redis != "" {
-				cli = benchclient.NewRedis(options.Redis)
-			} else if options.RedisCluster {
-				cli = benchclient.NewElasticCache()
+				if options.RedisCluster > 1 {
+					cli = benchclient.NewElasticCache(options.Redis, options.RedisCluster, 0)
+				} else {
+					cli = benchclient.NewRedis(options.Redis)
+				}
 			} else if options.Dummy {
 				cli = benchclient.NewDummy(options.Bandwidth)
 			} else {

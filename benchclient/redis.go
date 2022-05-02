@@ -2,55 +2,38 @@ package benchclient
 
 import (
 	"context"
+	"fmt"
+	"math"
 
 	"github.com/go-redis/redis/v8"
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
 var (
-	AWSElasticCacheCluster = func() ([]redis.ClusterSlot, error) {
-		slots := []redis.ClusterSlot{
-			// First node with 1 master and 1 slave.
-			{
-				Start: 0,
-				End:   3276,
-				Nodes: []redis.ClusterNode{{
-					Addr: "trace1.lqm2mp.ng.0001.use1.cache.amazonaws.com:6379",
-				}},
-			},
-			// Second node with 1 master and 1 slave.
-			{
-				Start: 3277,
-				End:   6553,
-				Nodes: []redis.ClusterNode{{
-					Addr: "trace2.lqm2mp.ng.0001.use1.cache.amazonaws.com:6379",
-				}},
-			},
-			{
-				Start: 6554,
-				End:   9830,
-				Nodes: []redis.ClusterNode{{
-					Addr: "trace3.lqm2mp.ng.0001.use1.cache.amazonaws.com:6379", // master
-				}},
-			},
-			{
-				Start: 9831,
-				End:   13107,
-				Nodes: []redis.ClusterNode{{
-					Addr: "trace4.lqm2mp.ng.0001.use1.cache.amazonaws.com:6379", // master
-				}},
-			},
-			{
-				Start: 13108,
-				End:   16383,
-				Nodes: []redis.ClusterNode{{
-					Addr: "trace5.lqm2mp.ng.0001.use1.cache.amazonaws.com:6379", // master
-				}},
-			},
+	GenElasticCacheCluster = func(client *Redis, addrPattern string, nodes int, numSlots int) RedisClusterSlotsProvider {
+		return func(ctx context.Context) ([]redis.ClusterSlot, error) {
+			client.ctx = ctx
+			if numSlots == 0 {
+				numSlots = 16384
+			}
+			slots := make([]redis.ClusterSlot, nodes)
+			slotStep := int(math.Round(float64(numSlots) / float64(nodes)))
+			for i := 0; i < nodes; i++ {
+				slots[i].Start = i * slotStep
+				slots[i].End = (i+1)*slotStep - 1
+				if slots[i].End >= numSlots {
+					slots[i].End = numSlots - 1
+				}
+				slots[i].Nodes = []redis.ClusterNode{{
+					Addr: fmt.Sprintf(addrPattern, i+1),
+				}}
+			}
+			return slots, nil
 		}
-		return slots, nil
 	}
 )
+
+type RedisClusterSlotsProvider func(context.Context) ([]redis.ClusterSlot, error)
 
 type Redis struct {
 	*defaultClient
@@ -78,12 +61,12 @@ func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
 	return client
 }
 
-func NewElasticCache() *Redis {
+func NewElasticCache(addrPattern string, nodes int, numSlots int) *Redis {
 	client := &Redis{
 		defaultClient: newDefaultClient("Redis: "),
 	}
 	client.backend = redis.NewClusterClient(&redis.ClusterOptions{
-		ClusterSlots:  client.getClusterSlots,
+		ClusterSlots:  GenElasticCacheCluster(client, addrPattern, nodes, numSlots),
 		RouteRandomly: true,
 	})
 	client.setter = client.set
@@ -111,9 +94,4 @@ func (r *Redis) Close() {
 		r.backend.Close()
 		r.backend = nil
 	}
-}
-
-func (r *Redis) getClusterSlots(ctx context.Context) ([]redis.ClusterSlot, error) {
-	r.ctx = ctx
-	return AWSElasticCacheCluster()
 }
