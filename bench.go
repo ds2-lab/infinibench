@@ -98,7 +98,7 @@ type Options struct {
 // DefaultsOptions are the default options used by the Bench() function.
 var DefaultOptions = &Options{
 	AddrList:       "127.0.0.1:6378",
-	Bucket:         "ao.lambda.code",
+	Bucket:         "mason-leap-lab.infinicache",
 	Requests:       15,
 	Clients:        1,
 	Pipeline:       1,

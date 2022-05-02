@@ -1,6 +1,7 @@
 package benchclient
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -8,9 +9,30 @@ import (
 	"github.com/mason-leap-lab/infinicache/common/logger"
 )
 
+const (
+	ResultSuccess  = 0
+	ResultError    = 1
+	ResultNotFound = 2
+)
+
+func resultFromError(err error) int {
+	switch err {
+	case nil:
+		return ResultSuccess
+	case infinicache.ErrNotFound:
+		return ResultNotFound
+	default:
+		return ResultError
+	}
+}
+
+var (
+	ErrNotSupported = errors.New("not supported")
+)
+
 type Client interface {
-	EcSet(string, []byte, ...interface{}) (string, bool)
-	EcGet(string, ...interface{}) (string, infinicache.ReadAllCloser, bool)
+	EcSet(string, []byte, ...interface{}) (string, error)
+	EcGet(string, ...interface{}) (string, infinicache.ReadAllCloser, error)
 	Close()
 }
 
@@ -40,7 +62,7 @@ func newDefaultClientWithAccessor(logPrefix string, setter clientSetter, getter 
 	}
 }
 
-func (c *defaultClient) EcSet(key string, val []byte, args ...interface{}) (string, bool) {
+func (c *defaultClient) EcSet(key string, val []byte, args ...interface{}) (string, error) {
 	reqId := uuid.New().String()
 
 	// Debuging options
@@ -49,24 +71,27 @@ func (c *defaultClient) EcSet(key string, val []byte, args ...interface{}) (stri
 		dryrun, _ = args[0].(int)
 	}
 	if dryrun > 0 {
-		return reqId, true
+		return reqId, nil
 	}
 
 	if c.setter == nil {
-		return reqId, false
+		return reqId, ErrNotSupported
 	}
 
 	// Timing
 	start := time.Now()
-	if err := c.setter(key, val); err != nil {
-		c.log.Error("failed to upload: %v", err)
-		return reqId, false
+	err := c.setter(key, val)
+	duration := time.Since(start)
+	nanoLog(logClient, "set", reqId, start.UnixNano(), duration.Nanoseconds(), len(val), resultFromError(err))
+	if err != nil {
+		c.log.Error("Failed to upload: %v", err)
+		return reqId, err
 	}
-	c.log.Info("Set %s %d", key, int64(time.Since(start)))
-	return reqId, true
+	c.log.Info("Set %s %v", key, duration)
+	return reqId, nil
 }
 
-func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinicache.ReadAllCloser, bool) {
+func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinicache.ReadAllCloser, error) {
 	reqId := uuid.New().String()
 
 	var dryrun int
@@ -74,23 +99,28 @@ func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinica
 		dryrun, _ = args[0].(int)
 	}
 	if dryrun > 0 {
-		return reqId, nil, true
+		return reqId, nil, nil
 	}
 
 	if c.getter == nil {
-		return reqId, nil, false
+		return reqId, nil, ErrNotSupported
 	}
 
 	// Timing
 	start := time.Now()
 	reader, err := c.getter(key)
+	duration := time.Since(start)
+	size := 0
+	if reader != nil {
+		size = reader.Len()
+	}
+	nanoLog(logClient, "get", reqId, start.UnixNano(), duration.Nanoseconds(), size, resultFromError(err))
 	if err != nil {
 		c.log.Error("failed to download: %v", err)
-		return reqId, nil, false
+		return reqId, nil, err
 	}
-	c.log.Info("Get %s %d", key, int64(time.Since(start)))
-
-	return reqId, reader, true
+	c.log.Info("Get %s %v", key, duration)
+	return reqId, reader, nil
 }
 
 func (c *defaultClient) Close() {

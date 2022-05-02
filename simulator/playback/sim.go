@@ -41,6 +41,7 @@ import (
 	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash"
 	"github.com/dustin/go-humanize"
+	"github.com/mason-leap-lab/go-utils"
 	"github.com/mason-leap-lab/infinicache/client"
 	"github.com/mason-leap-lab/infinicache/common/logger"
 	"github.com/mason-leap-lab/infinicache/proxy/global"
@@ -54,6 +55,10 @@ import (
 const (
 	TIME_PATTERN  = "2006-01-02 15:04:05.000"
 	TIME_PATTERN2 = "2006-01-02 15:04:05"
+
+	PerformResultSuccess  = 0
+	PerformResultError    = 1
+	PerformResultNotFound = 2
 )
 
 var (
@@ -94,6 +99,7 @@ type Options struct {
 	S3               string
 	Redis            string
 	RedisCluster     bool
+	Dummy            bool
 	Balance          bool
 	Concurrency      int
 	Bandwidth        int64
@@ -103,6 +109,8 @@ type Options struct {
 	FunctionCapacity uint64
 	FunctionOverhead uint64
 }
+
+type NanoLogProvider func(func(nanolog.Handle, ...interface{}) error)
 
 type FinalizeOptions struct {
 	once         sync.Once
@@ -123,7 +131,7 @@ func (h hasher) Sum64(data []byte) uint64 {
 	return xxhash.Sum64(data)
 }
 
-func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.Object) (string, string) {
+func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.Object) (string, string, int) {
 	dryrun := 0
 	if opts.Dryrun {
 		dryrun = proxy.SLICE_SIZE
@@ -137,59 +145,61 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 	if placements := p.Placements(obj.Key); placements != nil {
 		log.Trace("Found placements of %v: %v", obj.Key, placements)
 
-		reqId, reader, _ := cli.EcGet(obj.Key, dryrun)
-		// if opts.Dryrun && opts.Balance {
-		// 	success = p.Validate(obj)
-		// }
+		reqId, reader, err := cli.EcGet(obj.Key, dryrun)
+		if opts.Dryrun && opts.Balance {
+			success := p.Validate(obj)
+			if !success {
+				err = client.ErrNotFound
+			}
+		}
 
-		// if !success {
-		// 	val := make([]byte, obj.Size)
-		// 	rand.Read(val)
-		// 	resetPlacements32 := make([]int, opts.Datashard+opts.Parityshard)
-		// 	for i := 0; i < len(placements); i++ {
-		// 		resetPlacements32[i] = int(placements[i])
-		// 	}
-		// 	_, reset := cli.EcSet(obj.Key, val, dryrun, resetPlacements32, "Reset")
-		// 	// Reset is designed for caching system in normal(playback) mode.
-		// 	// Only one of concurrent Reset requests is expected to success.
-		// 	if reset {
-		// 		log.Trace("Reset %s.", obj.Key)
+		if err == client.ErrNotFound {
+			val := make([]byte, obj.Size)
+			rand.Read(val)
+			resetPlacements32 := make([]int, opts.Datashard+opts.Parityshard)
+			for i := 0; i < len(placements); i++ {
+				resetPlacements32[i] = int(placements[i])
+			}
+			_, err := cli.EcSet(obj.Key, val, dryrun, resetPlacements32, "Reset")
+			// Reset is designed for caching system in normal(playback) mode.
+			// Only one of concurrent Reset requests is expected to success.
+			if err == nil {
+				log.Trace("Reset %s.", obj.Key)
 
-		// 		displaced := false
-		// 		resetPlacements64 := make([]uint64, opts.Datashard+opts.Parityshard)
-		// 		for i := 0; i < len(resetPlacements32); i++ {
-		// 			resetPlacements64[i] = uint64(resetPlacements32[i])
-		// 		}
-		// 		resetPlacements := p.Remap(resetPlacements64, obj)
-		// 		for i, idx := range resetPlacements {
-		// 			p.ValidateLambda(idx)
-		// 			chk, _ := p.LambdaPool[placements[i]].GetChunk(fmt.Sprintf("%d@%s", i, obj.Key))
-		// 			if chk == nil {
-		// 				// Eviction tracked by simulator. Try find chunk from evicts.
-		// 				chk = p.GetEvicted(fmt.Sprintf("%d@%s", i, obj.Key))
-		// 				displaced = true
-		// 			} else if idx != placements[i] {
-		// 				// Placement changed?
-		// 				displaced = true
-		// 				log.Warn("Placement changed on reset %s, %d -> %d", chk.Key, placements[i], idx)
-		// 				p.LambdaPool[placements[i]].DelChunk(chk.Key)
-		// 			}
-		// 			if chk == nil {
-		// 				// Unlikely, but just in case
-		// 				log.Warn("Failed to track chunk %d@%s on resetting", i, obj.Key)
-		// 			} else {
-		// 				p.LambdaPool[idx].AddChunk(chk)
-		// 				chk.Reset++
-		// 			}
-		// 			p.LambdaPool[idx].Activate(obj.Timestamp)
-		// 		}
-		// 		if displaced {
-		// 			p.ResetPlacements(obj.Key, resetPlacements)
-		// 		}
-		// 	}
-		// 	return "get", reqId
-		// } else
-		if reader != nil {
+				displaced := false
+				resetPlacements64 := make([]uint64, opts.Datashard+opts.Parityshard)
+				for i := 0; i < len(resetPlacements32); i++ {
+					resetPlacements64[i] = uint64(resetPlacements32[i])
+				}
+				resetPlacements := p.Remap(resetPlacements64, obj)
+				for i, idx := range resetPlacements {
+					p.ValidateLambda(idx)
+					chk, _ := p.LambdaPool[placements[i]].GetChunk(fmt.Sprintf("%d@%s", i, obj.Key))
+					if chk == nil {
+						// Eviction tracked by simulator. Try find chunk from evicts.
+						chk = p.GetEvicted(fmt.Sprintf("%d@%s", i, obj.Key))
+						displaced = true
+					} else if idx != placements[i] {
+						// Placement changed?
+						displaced = true
+						log.Warn("Placement changed on reset %s, %d -> %d", chk.Key, placements[i], idx)
+						p.LambdaPool[placements[i]].DelChunk(chk.Key)
+					}
+					if chk == nil {
+						// Unlikely, but just in case
+						log.Warn("Failed to track chunk %d@%s on resetting", i, obj.Key)
+					} else {
+						p.LambdaPool[idx].AddChunk(chk)
+						chk.Reset++
+					}
+					p.LambdaPool[idx].Activate(obj.Timestamp)
+				}
+				if displaced {
+					p.ResetPlacements(obj.Key, resetPlacements)
+				}
+			}
+			return "get", reqId, PerformResultNotFound
+		} else if reader != nil {
 			reader.Close()
 		}
 		log.Trace("Get %s.", obj.Key)
@@ -203,7 +213,7 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 			chk.Freq++
 			p.LambdaPool[idx].Activate(obj.Timestamp)
 		}
-		return "get", reqId
+		return "get", reqId, utils.Ifelse(err == nil, PerformResultSuccess, PerformResultError).(int)
 	} else {
 		log.Trace("No placements found: %v", obj.Key)
 
@@ -216,10 +226,10 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		}
 		placements32 := make([]int, opts.Datashard+opts.Parityshard)
 		placements := make([]uint64, len(placements32))
-		reqId, success := cli.EcSet(obj.Key, val, dryrun, placements32, "Normal")
-		if !success {
+		reqId, err := cli.EcSet(obj.Key, val, dryrun, placements32, "Normal")
+		if err != nil {
 			p.ClearPlacements(obj.Key)
-			return "set", reqId
+			return "set", reqId, PerformResultError
 		}
 		for i := 0; i < len(placements32); i++ {
 			placements[i] = uint64(placements32[i])
@@ -245,7 +255,7 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		}
 		log.Trace("Set %s, placements: %v.", obj.Key, placements)
 		p.SetPlacements(obj.Key, placements)
-		return "set", reqId
+		return "set", reqId, PerformResultSuccess
 	}
 }
 
@@ -284,7 +294,7 @@ func helpInfo(flag *sysflag.FlagSet) {
 }
 
 func main() {
-	flag := &sysflag.FlagSet{}
+	flag := sysflag.NewFlagSet("defaut", sysflag.ContinueOnError)
 
 	var printInfo bool
 	flag.BoolVar(&printInfo, "h", false, "help info?")
@@ -313,6 +323,7 @@ func main() {
 	flag.StringVar(&options.S3, "s3", "", "s3 bucket for enable s3 simulation")
 	flag.StringVar(&options.Redis, "redis", "", "Redis for enable Redis simulation")
 	flag.BoolVar(&options.RedisCluster, "redisCluster", false, "redisCluster for enable Redis simulation")
+	flag.BoolVar(&options.Dummy, "dummy", false, "using Dummy client for simulation")
 	flag.BoolVar(&options.Balance, "balance", false, "enable balancer on dryrun")
 	flag.IntVar(&options.Concurrency, "c", 100, "max concurrency allowed, minimum 1.")
 	flag.Int64Var(&options.Bandwidth, "w", 0, "unit bandwidth per shard in MiB/s. 0 for unlimited bandwidth")
@@ -350,12 +361,6 @@ func main() {
 		log.Verbose = false
 		log.Level = logger.LOG_LEVEL_WARN
 	}
-	if options.File != "" {
-		if err := logCreate(options); err != nil {
-			panic(err)
-		}
-		finalizeOptions.closeNanolog = true
-	}
 	if options.Concurrency <= 0 {
 		options.Concurrency = 1
 	}
@@ -374,8 +379,12 @@ func main() {
 	}
 	finalizeOptions.traceFile = traceFile
 
+	nanologProvider := benchclient.SetLogger
 	addrArr := strings.Split(options.AddrList, ",")
 	proxies, ring := initProxies(len(addrArr), options)
+	if options.Dummy {
+		benchclient.ResetDummySizeRegistry()
+	}
 	clients = proxy.InitPool(&proxy.Pool{
 		New: func() interface{} {
 			atomic.AddInt32(&numClients, 1)
@@ -386,11 +395,14 @@ func main() {
 				cli = benchclient.NewRedis(options.Redis)
 			} else if options.RedisCluster {
 				cli = benchclient.NewElasticCache()
+			} else if options.Dummy {
+				cli = benchclient.NewDummy(options.Bandwidth)
 			} else {
 				cli = client.NewClient(options.Datashard, options.Parityshard, options.ECmaxgoroutine)
 				if !options.Dryrun {
 					cli.(*client.Client).Dial(addrArr)
 				}
+				nanologProvider = client.SetLogger
 			}
 			return cli
 		},
@@ -398,6 +410,13 @@ func main() {
 			c.(benchclient.Client).Close()
 		},
 	}, options.Concurrency, proxy.PoolForStrictConcurrency)
+
+	if options.File != "" {
+		if err := logCreate(options, nanologProvider); err != nil {
+			panic(err)
+		}
+		finalizeOptions.closeNanolog = true
+	}
 
 	var reader readers.RecordReader
 	switch strings.ToLower(options.TraceName) {
@@ -601,7 +620,7 @@ func main() {
 				actural := skippedDuration + time.Since(start)
 				log.Info("%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
-				_, reqId := perform(options, cli, p, obj)
+				_, reqId, _ := perform(options, cli, p, obj)
 				clients.Put(cli)
 				if notifier != nil {
 					notifier.Wait()
@@ -698,7 +717,7 @@ func finalize(opts *FinalizeOptions) {
 }
 
 //logCreate create the nanoLog
-func logCreate(opts *Options) error {
+func logCreate(opts *Options, setLogger NanoLogProvider) error {
 	// Set up nanoLog writer
 	path := opts.File + "_playback.clog"
 	nanoLogout, err := os.Create(path)
@@ -710,7 +729,7 @@ func logCreate(opts *Options) error {
 		return err
 	}
 
-	client.SetLogger(nanolog.Log)
+	setLogger(nanolog.Log)
 
 	return nil
 }

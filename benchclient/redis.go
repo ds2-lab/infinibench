@@ -97,7 +97,9 @@ func (r *Redis) set(key string, val []byte) (err error) {
 
 func (r *Redis) get(key string) (infinicache.ReadAllCloser, error) {
 	val, err := r.backend.Get(r.ctx, key).Bytes()
-	if err != nil {
+	if err == redis.Nil {
+		return nil, infinicache.ErrNotFound
+	} else if err != nil {
 		return nil, err
 	} else {
 		return NewByteReader(val), nil
