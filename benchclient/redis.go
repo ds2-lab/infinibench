@@ -11,9 +11,8 @@ import (
 )
 
 var (
-	GenElasticCacheCluster = func(client *Redis, addrPattern string, nodes int, numSlots int) RedisClusterSlotsProvider {
+	GenElasticCacheCluster = func(addrPattern string, nodes int, numSlots int) RedisClusterSlotsProvider {
 		return func(ctx context.Context) ([]redis.ClusterSlot, error) {
-			client.ctx = ctx
 			if numSlots == 0 {
 				numSlots = 16384
 			}
@@ -45,7 +44,17 @@ type RedisClusterSlotsProvider func(context.Context) ([]redis.ClusterSlot, error
 type Redis struct {
 	*defaultClient
 	backend redis.UniversalClient
-	ctx     context.Context
+}
+
+func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
+	//client := newSession(addr)
+	client := &Redis{
+		defaultClient: newDefaultClient("Redis: "),
+		backend:       backend,
+	}
+	client.setter = client.set
+	client.getter = client.get
+	return client
 }
 
 func NewRedis(addr string) *Redis {
@@ -56,37 +65,20 @@ func NewRedis(addr string) *Redis {
 	return NewRedisWithBackend(backend)
 }
 
-func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
-	//client := newSession(addr)
-	client := &Redis{
-		defaultClient: newDefaultClient("Redis: "),
-		backend:       backend,
-		ctx:           context.Background(),
-	}
-	client.setter = client.set
-	client.getter = client.get
-	return client
-}
-
 func NewElasticCache(addrPattern string, nodes int, numSlots int) *Redis {
-	client := &Redis{
-		defaultClient: newDefaultClient("Redis: "),
-	}
-	client.backend = redis.NewClusterClient(&redis.ClusterOptions{
-		ClusterSlots:  GenElasticCacheCluster(client, addrPattern, nodes, numSlots),
+	backend := redis.NewClusterClient(&redis.ClusterOptions{
+		ClusterSlots:  GenElasticCacheCluster(addrPattern, nodes, numSlots),
 		RouteRandomly: true,
 	})
-	client.setter = client.set
-	client.getter = client.get
-	return client
+	return NewRedisWithBackend(backend)
 }
 
 func (r *Redis) set(key string, val []byte) (err error) {
-	return r.backend.Set(r.ctx, key, val, 0).Err()
+	return r.backend.Set(context.Background(), key, val, 0).Err()
 }
 
 func (r *Redis) get(key string) (infinicache.ReadAllCloser, error) {
-	val, err := r.backend.Get(r.ctx, key).Bytes()
+	val, err := r.backend.Get(context.Background(), key).Bytes()
 	if err == redis.Nil {
 		return nil, infinicache.ErrNotFound
 	} else if err != nil {
