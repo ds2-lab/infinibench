@@ -2,8 +2,6 @@
 package main
 
 import (
-	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -35,39 +33,6 @@ const (
 	CLIENT_FSX         = "fsx"
 	CLIENT_EFS         = "efs"
 )
-
-func readResp(rd *bufio.Reader, n int, opts *Options) error {
-	for i := 0; i < n; i++ {
-		line, err := rd.ReadBytes('\n')
-		if err != nil {
-			return err
-		}
-		switch line[0] {
-		default:
-			return errors.New("invalid server response")
-		case '+', ':':
-		case '-':
-			opts.Stderr.Write(line)
-		case '$':
-			n, err := strconv.ParseInt(string(line[1:len(line)-2]), 10, 64)
-			if err != nil {
-				return err
-			}
-			if n >= 0 {
-				if _, err = io.CopyN(ioutil.Discard, rd, n+2); err != nil {
-					return err
-				}
-			}
-		case '*':
-			n, err := strconv.ParseInt(string(line[1:len(line)-2]), 10, 64)
-			if err != nil {
-				return err
-			}
-			readResp(rd, int(n), opts)
-		}
-	}
-	return nil
-}
 
 // Options represents various options used by the Bench() function.
 type Options struct {
@@ -199,7 +164,7 @@ func Bench(
 			}
 			cli = benchclient.NewS3(bucket)
 		case CLIENT_ELASTICACHE:
-			cli = benchclient.NewElasticCache()
+			cli = benchclient.NewRedisClusterByAddresses(strings.Split(opts.AddrList, ","), 0)
 		case CLIENT_EFS:
 			fallthrough
 		case CLIENT_FSX:

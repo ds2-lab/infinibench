@@ -43,6 +43,7 @@ type defaultClient struct {
 	log    logger.ILogger
 	setter clientSetter
 	getter clientGetter
+	abbr   string // Abbreviation for logging
 }
 
 func newDefaultClient(logPrefix string) *defaultClient {
@@ -59,6 +60,7 @@ func newDefaultClientWithAccessor(logPrefix string, setter clientSetter, getter 
 		},
 		setter: setter,
 		getter: getter,
+		abbr:   "na",
 	}
 }
 
@@ -82,12 +84,12 @@ func (c *defaultClient) EcSet(key string, val []byte, args ...interface{}) (stri
 	start := time.Now()
 	err := c.setter(key, val)
 	duration := time.Since(start)
-	nanoLog(logClient, "set", reqId, start.UnixNano(), duration.Nanoseconds(), len(val), resultFromError(err))
+	nanoLog(logClient, "set", reqId, start.UnixNano(), duration.Nanoseconds(), len(val), resultFromError(err), c.abbr)
 	if err != nil {
 		c.log.Error("Failed to upload: %v", err)
 		return reqId, err
 	}
-	c.log.Info("Set %s %v", key, duration)
+	c.log.Info("Set %s %v %d", key, duration, len(val))
 	return reqId, nil
 }
 
@@ -114,12 +116,12 @@ func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinica
 	if reader != nil {
 		size = reader.Len()
 	}
-	nanoLog(logClient, "get", reqId, start.UnixNano(), duration.Nanoseconds(), size, resultFromError(err))
+	nanoLog(logClient, "get", reqId, start.UnixNano(), duration.Nanoseconds(), size, resultFromError(err), c.abbr)
 	if err != nil {
 		c.log.Error("failed to download: %v", err)
 		return reqId, nil, err
 	}
-	c.log.Info("Get %s %v", key, duration)
+	c.log.Info("Get %s %v %d", key, duration, size)
 	return reqId, reader, nil
 }
 

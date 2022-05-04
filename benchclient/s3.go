@@ -20,7 +20,7 @@ var (
 
 type S3 struct {
 	*defaultClient
-	bucket string
+	bucket     string
 	uploader   *s3manager.Uploader
 	downloader *s3manager.Downloader
 }
@@ -28,12 +28,13 @@ type S3 struct {
 func NewS3(bk string) *S3 {
 	client := &S3{
 		defaultClient: newDefaultClient("S3: "),
-		bucket: bk,
-		uploader: s3manager.NewUploader(AWSSession),
-		downloader: s3manager.NewDownloader(AWSSession),
+		bucket:        bk,
+		uploader:      s3manager.NewUploader(AWSSession),
+		downloader:    s3manager.NewDownloader(AWSSession),
 	}
 	client.setter = client.set
 	client.getter = client.get
+	client.abbr = "s3"
 	return client
 }
 

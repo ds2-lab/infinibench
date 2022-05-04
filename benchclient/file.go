@@ -4,21 +4,23 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
 type File struct {
 	*defaultClient
-	basePath   string
+	basePath string
 }
 
 func NewFile(provider string, path string) *File {
 	client := &File{
 		defaultClient: newDefaultClient(provider + ": "),
-		basePath: path,
+		basePath:      path,
 	}
 	client.setter = client.set
 	client.getter = client.get
+	client.abbr = "f"
 	return client
 }
 

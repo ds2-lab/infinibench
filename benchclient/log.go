@@ -14,8 +14,8 @@ var (
 )
 
 func init() {
-	// cmd, reqId, begin, duration, size, ret
-	logClient = nanolog.AddLogger("%s,%s,%i64,%i64,%i,%i")
+	// cmd, reqId, begin, duration, size, ret, client
+	logClient = nanolog.AddLogger("%s,%s,%i64,%i64,%i,%i,%s")
 }
 
 type logEntry struct {

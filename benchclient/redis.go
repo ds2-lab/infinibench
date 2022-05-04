@@ -10,40 +10,47 @@ import (
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
-var (
-	GenElasticCacheCluster = func(addrPattern string, nodes int, numSlots int) RedisClusterSlotsProvider {
-		var cached []redis.ClusterSlot
-		return func(ctx context.Context) ([]redis.ClusterSlot, error) {
-			if cached != nil {
-				return cached, nil
-			}
-
-			if numSlots == 0 {
-				numSlots = 16384
-			}
-			slots := make([]redis.ClusterSlot, nodes)
-			slotStep := int(math.Floor(float64(numSlots) / float64(nodes)))
-			remainder := numSlots - slotStep*nodes
-			next := 0
-			for i := 0; i < nodes; i++ {
-				bonus := 0
-				if remainder > 0 {
-					bonus = 1
-					remainder--
-				}
-				slots[i].Start = next
-				slots[i].End = slots[i].Start + slotStep + bonus - 1
-				next = slots[i].End + 1
-				slots[i].Nodes = []redis.ClusterNode{{
-					Addr: fmt.Sprintf(addrPattern, i+1),
-				}}
-			}
-			cached = slots
-			log.Printf("Confirmed redis cluster slots: %v", cached)
+func GenRedisClusterSlotsProviderByAddresses(addrs []string, numSlots int) RedisClusterSlotsProvider {
+	var cached []redis.ClusterSlot
+	return func(ctx context.Context) ([]redis.ClusterSlot, error) {
+		if cached != nil {
 			return cached, nil
 		}
+
+		if numSlots == 0 {
+			numSlots = 16384
+		}
+		nodes := len(addrs)
+		slots := make([]redis.ClusterSlot, nodes)
+		slotStep := int(math.Floor(float64(numSlots) / float64(nodes)))
+		remainder := numSlots - slotStep*nodes
+		next := 0
+		for i := 0; i < nodes; i++ {
+			bonus := 0
+			if remainder > 0 {
+				bonus = 1
+				remainder--
+			}
+			slots[i].Start = next
+			slots[i].End = slots[i].Start + slotStep + bonus - 1
+			next = slots[i].End + 1
+			slots[i].Nodes = []redis.ClusterNode{{
+				Addr: addrs[i],
+			}}
+		}
+		cached = slots
+		log.Printf("Confirmed redis cluster slots: %v", cached)
+		return cached, nil
 	}
-)
+}
+
+func GenElasticCacheClusterSlotsProvider(addrPattern string, nodes int, numSlots int) RedisClusterSlotsProvider {
+	addrs := make([]string, nodes)
+	for i := 0; i < nodes; i++ {
+		addrs[i] = fmt.Sprintf(addrPattern, i+1)
+	}
+	return GenRedisClusterSlotsProviderByAddresses(addrs, numSlots)
+}
 
 type RedisClusterSlotsProvider func(context.Context) ([]redis.ClusterSlot, error)
 
@@ -60,6 +67,7 @@ func NewRedisWithBackend(backend redis.UniversalClient) *Redis {
 	}
 	client.setter = client.set
 	client.getter = client.get
+	client.abbr = "ec"
 	return client
 }
 
@@ -71,9 +79,17 @@ func NewRedis(addr string) *Redis {
 	return NewRedisWithBackend(backend)
 }
 
+func NewRedisClusterByAddresses(addrs []string, numSlots int) *Redis {
+	backend := redis.NewClusterClient(&redis.ClusterOptions{
+		ClusterSlots:  GenRedisClusterSlotsProviderByAddresses(addrs, numSlots),
+		RouteRandomly: true,
+	})
+	return NewRedisWithBackend(backend)
+}
+
 func NewElasticCache(addrPattern string, nodes int, numSlots int) *Redis {
 	backend := redis.NewClusterClient(&redis.ClusterOptions{
-		ClusterSlots:  GenElasticCacheCluster(addrPattern, nodes, numSlots),
+		ClusterSlots:  GenElasticCacheClusterSlotsProvider(addrPattern, nodes, numSlots),
 		RouteRandomly: true,
 	})
 	return NewRedisWithBackend(backend)

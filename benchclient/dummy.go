@@ -2,10 +2,19 @@ package benchclient
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
+	"strings"
 	"time"
 
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 	"github.com/zhangjyr/hashmap"
+)
+
+const (
+	DummyStore          = "ds"
+	DummyCache          = "dc"
+	DummyCacheMissRatio = 50 // Miss ratio of cache, 10 means 10%
 )
 
 var (
@@ -24,15 +33,16 @@ type Dummy struct {
 
 // NewDummy returns a new dummy client.
 // bandwidth defined the bandwidth of the dummy client in B/s, 0 for unlimited.
-func NewDummy(bandwidth int64) *Dummy {
+func NewDummy(bandwidth int64, t string) *Dummy {
 	//client := newSession(addr)
 	client := &Dummy{
-		defaultClient: newDefaultClient("Dummy: "),
+		defaultClient: newDefaultClient(fmt.Sprintf("Dummy%s: ", strings.ToUpper(t))),
 		ctx:           context.Background(),
 		bandwidth:     bandwidth,
 	}
 	client.setter = client.set
 	client.getter = client.get
+	client.abbr = t
 	return client
 }
 
@@ -50,6 +60,10 @@ func (d *Dummy) set(key string, val []byte) (err error) {
 func (d *Dummy) get(key string) (infinicache.ReadAllCloser, error) {
 	size, ok := sizemap.Get(key)
 	if !ok {
+		return nil, infinicache.ErrNotFound
+	}
+
+	if d.abbr == DummyCache && rand.Intn(100) < DummyCacheMissRatio {
 		return nil, infinicache.ErrNotFound
 	}
 

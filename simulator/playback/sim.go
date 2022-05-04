@@ -67,8 +67,8 @@ var (
 		Level:   logger.LOG_LEVEL_ALL,
 		Color:   true,
 	}
-	clients    *proxy.Pool
-	numClients int32
+	clientPools []*proxy.Pool
+	numClients  int32
 )
 
 func init() {
@@ -100,6 +100,7 @@ type Options struct {
 	Redis            string
 	RedisCluster     int
 	Dummy            bool
+	Failover         string
 	Balance          bool
 	Concurrency      int
 	Bandwidth        int64
@@ -154,8 +155,22 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		}
 
 		if err == client.ErrNotFound {
-			val := make([]byte, obj.Size)
-			rand.Read(val)
+			var val []byte
+			if len(clientPools) > 0 {
+				cli := clientPools[1].Get().(benchclient.Client)
+				_, reader, _ := cli.EcGet(obj.Key, dryrun)
+				if reader != nil {
+					val, _ = reader.ReadAll()
+					reader.Close()
+				}
+				clientPools[1].Put(cli)
+			}
+
+			if val == nil && !opts.Lean {
+				log.Warn("Regenerate %d bytes object", obj.Size)
+				val = make([]byte, obj.Size)
+				rand.Read(val)
+			}
 			resetPlacements32 := make([]int, opts.Datashard+opts.Parityshard)
 			for i := 0; i < len(placements); i++ {
 				resetPlacements32[i] = int(placements[i])
@@ -226,6 +241,13 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		}
 		placements32 := make([]int, opts.Datashard+opts.Parityshard)
 		placements := make([]uint64, len(placements32))
+		if len(clientPools) > 1 {
+			go func(key string, val []byte) {
+				cli := clientPools[1].Get().(benchclient.Client)
+				cli.EcSet(key, val, dryrun)
+				clientPools[1].Put(cli)
+			}(obj.Key, val)
+		}
 		reqId, err := cli.EcSet(obj.Key, val, dryrun, placements32, "Normal")
 		if err != nil {
 			p.ClearPlacements(obj.Key)
@@ -324,6 +346,7 @@ func main() {
 	flag.StringVar(&options.Redis, "redis", "", "Redis address for enable Redis simulation")
 	flag.IntVar(&options.RedisCluster, "redisCluster", 1, "The number of nodes in the redis cluster. Set larger than 1 to enable Redis cluster")
 	flag.BoolVar(&options.Dummy, "dummy", false, "using Dummy client for simulation")
+	flag.StringVar(&options.Failover, "failover", "", "specify the failover service in case the main service failed. The failover service can be s3 and must be enabled in parameters.")
 	flag.BoolVar(&options.Balance, "balance", false, "enable balancer on dryrun")
 	flag.IntVar(&options.Concurrency, "c", 100, "max concurrency allowed, minimum 1.")
 	flag.Int64Var(&options.Bandwidth, "w", 0, "unit bandwidth per shard in MiB/s. 0 for unlimited bandwidth")
@@ -385,33 +408,52 @@ func main() {
 	if options.Dummy {
 		benchclient.ResetDummySizeRegistry()
 	}
-	clients = proxy.InitPool(&proxy.Pool{
-		New: func() interface{} {
-			atomic.AddInt32(&numClients, 1)
-			var cli benchclient.Client
-			if options.S3 != "" {
-				cli = benchclient.NewS3(options.S3)
-			} else if options.Redis != "" {
-				if options.RedisCluster > 1 {
-					cli = benchclient.NewElasticCache(options.Redis, options.RedisCluster, 0)
-				} else {
-					cli = benchclient.NewRedis(options.Redis)
-				}
-			} else if options.Dummy {
-				cli = benchclient.NewDummy(options.Bandwidth)
-			} else {
-				cli = client.NewClient(options.Datashard, options.Parityshard, options.ECmaxgoroutine)
-				if !options.Dryrun {
-					cli.(*client.Client).Dial(addrArr)
-				}
-				nanologProvider = client.SetLogger
-			}
-			return cli
-		},
-		Finalize: func(c interface{}) {
-			c.(benchclient.Client).Close()
-		},
-	}, options.Concurrency, proxy.PoolForStrictConcurrency)
+	clientProviders := BuildClientProviders(options)
+	clientPools = make([]*proxy.Pool, 1, 2)
+	// Initiate failover client pool
+	if options.Failover != "" {
+		provider, ok := clientProviders[strings.ToLower(options.Failover)]
+		if !ok {
+			log.Error("Failover client specified but not enabled: %s", strings.ToLower(options.Failover))
+			os.Exit(1)
+			return
+		}
+		clientPools = append(clientPools, proxy.InitPool(&proxy.Pool{
+			New: func() interface{} {
+				// Only count the main pool.
+				// atomic.AddInt32(&numClients, 1)
+				return provider()
+			},
+			Finalize: func(c interface{}) {
+				c.(benchclient.Client).Close()
+			},
+		}, options.Concurrency, proxy.PoolForStrictConcurrency))
+		delete(clientProviders, strings.ToLower(options.Failover))
+
+		if options.Failover == ProviderDummy {
+			clientProviders[ProviderDummy] = GenDummyClientProvider(options.Bandwidth, benchclient.DummyCache)
+		}
+	}
+	// Ensure main client pool exists.
+	if len(clientProviders) == 0 {
+		clientProviders[ProviderDefault] = GenDefaultClientProvider(options)
+	}
+	// Initiate main client pool
+	for key, provider := range clientProviders {
+		clientPools[0] = proxy.InitPool(&proxy.Pool{
+			New: func() interface{} {
+				atomic.AddInt32(&numClients, 1)
+				return provider()
+			},
+			Finalize: func(c interface{}) {
+				c.(benchclient.Client).Close()
+			},
+		}, options.Concurrency, proxy.PoolForStrictConcurrency)
+		if key == ProviderDefault {
+			nanologProvider = client.SetLogger
+		}
+		break
+	}
 
 	if options.File != "" {
 		if err := logCreate(options, nanologProvider); err != nil {
@@ -596,7 +638,7 @@ func main() {
 			// for options.Concurrency > 0 && atomic.LoadInt32(&concurrency) >= int32(options.Concurrency) {
 			// 	cond.Wait()
 			// }
-			cli := clients.Get().(benchclient.Client)
+			cli := clientPools[0].Get().(benchclient.Client)
 
 			// Start perform
 			var notifier *helpers.TimeSkipNotification
@@ -623,7 +665,7 @@ func main() {
 				log.Info("%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
 				_, reqId, _ := perform(options, cli, p, obj)
-				clients.Put(cli)
+				clientPools[0].Put(cli)
 				if notifier != nil {
 					notifier.Wait()
 					// log.Debug("Skipped %d:%s", sn, obj.Key)
@@ -701,7 +743,9 @@ func main() {
 		syslog.Println(msg)
 	}
 
-	clients.Close()
+	for _, p := range clientPools {
+		p.Close()
+	}
 }
 
 func finalize(opts *FinalizeOptions) {
