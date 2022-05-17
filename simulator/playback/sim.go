@@ -41,9 +41,8 @@ import (
 	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash"
 	"github.com/dustin/go-humanize"
-	"github.com/mason-leap-lab/go-utils"
+	"github.com/mason-leap-lab/go-utils/logger"
 	"github.com/mason-leap-lab/infinicache/client"
-	"github.com/mason-leap-lab/infinicache/common/logger"
 	"github.com/mason-leap-lab/infinicache/proxy/global"
 	"github.com/wangaoone/redbench/benchclient"
 
@@ -67,8 +66,10 @@ var (
 		Level:   logger.LOG_LEVEL_ALL,
 		Color:   true,
 	}
-	clientPools []*proxy.Pool
-	numClients  int32
+	clientPools               []*proxy.Pool
+	numClients                int32
+	keySets, keyGets, keyMiss int32
+	sets, gets                int32
 )
 
 func init() {
@@ -135,7 +136,7 @@ func (h hasher) Sum64(data []byte) uint64 {
 func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.Object) (string, string, int) {
 	dryrun := 0
 	if opts.Dryrun {
-		dryrun = proxy.SLICE_SIZE
+		dryrun = opts.Cluster
 		if !opts.Compact && obj.Estimation > time.Duration(0) {
 			log.Debug("Sleep %v to simulate processing %s: ", obj.Estimation, obj.Key)
 			time.Sleep(obj.Estimation)
@@ -143,20 +144,27 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 	}
 
 	// log.Debug("Key:", obj.Key, "mapped to Proxy:", p.Id)
-	if placements := p.Placements(obj.Key); placements != nil {
-		log.Trace("Found placements of %v: %v", obj.Key, placements)
+	if placements, seen := p.Placements(obj.Key); seen {
+		atomic.AddInt32(&gets, 1)
+		// placements can only be empty if dryrun is true and specific balancer is used (e.g., proxy.LRUPlacer)
+		if placements != nil {
+			log.Trace("Found placements of %v: %v", obj.Key, placements)
+		}
 
 		reqId, reader, err := cli.EcGet(obj.Key, dryrun)
 		if opts.Dryrun && opts.Balance {
-			success := p.Validate(obj)
+			// Validate the result on dryrun.
+			success := placements != nil && p.Validate(obj)
 			if !success {
 				err = client.ErrNotFound
+				log.Warn("Not found due to eviction: %v", obj.Key)
 			}
 		}
 
 		if err == client.ErrNotFound {
+			atomic.AddInt32(&keyMiss, 1)
 			var val []byte
-			if len(clientPools) > 0 {
+			if len(clientPools) > 1 {
 				cli := clientPools[1].Get().(benchclient.Client)
 				_, reader, _ := cli.EcGet(obj.Key, dryrun)
 				if reader != nil {
@@ -189,22 +197,32 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 				resetPlacements := p.Remap(resetPlacements64, obj)
 				for i, idx := range resetPlacements {
 					p.ValidateLambda(idx)
-					chk, _ := p.LambdaPool[placements[i]].GetChunk(fmt.Sprintf("%d@%s", i, obj.Key))
+					add := false
+					var chk *proxy.Chunk
+					if placements != nil {
+						chk, _ = p.LambdaPool[placements[i]].GetChunk(fmt.Sprintf("%d@%s", i, obj.Key))
+					}
+
 					if chk == nil {
 						// Eviction tracked by simulator. Try find chunk from evicts.
 						chk = p.GetEvicted(fmt.Sprintf("%d@%s", i, obj.Key))
 						displaced = true
-					} else if idx != placements[i] {
+						add = true
+					} else if placements != nil && idx != placements[i] {
 						// Placement changed?
 						displaced = true
 						log.Warn("Placement changed on reset %s, %d -> %d", chk.Key, placements[i], idx)
 						p.LambdaPool[placements[i]].DelChunk(chk.Key)
+						add = true
 					}
+
 					if chk == nil {
 						// Unlikely, but just in case
 						log.Warn("Failed to track chunk %d@%s on resetting", i, obj.Key)
-					} else {
+					} else if add {
 						p.LambdaPool[idx].AddChunk(chk)
+						chk.Reset++
+					} else {
 						chk.Reset++
 					}
 					p.LambdaPool[idx].Activate(obj.Timestamp)
@@ -217,6 +235,11 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		} else if reader != nil {
 			reader.Close()
 		}
+		if err != nil {
+			return "get", reqId, PerformResultError
+		}
+
+		atomic.AddInt32(&keyGets, 1)
 		log.Trace("Get %s.", obj.Key)
 
 		for i, idx := range placements {
@@ -228,7 +251,7 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 			chk.Freq++
 			p.LambdaPool[idx].Activate(obj.Timestamp)
 		}
-		return "get", reqId, utils.Ifelse(err == nil, PerformResultSuccess, PerformResultError).(int)
+		return "get", reqId, PerformResultSuccess
 	} else {
 		log.Trace("No placements found: %v", obj.Key)
 
@@ -248,6 +271,7 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 				clientPools[1].Put(cli)
 			}(obj.Key, val)
 		}
+		atomic.AddInt32(&sets, 1)
 		reqId, err := cli.EcSet(obj.Key, val, dryrun, placements32, "Normal")
 		if err != nil {
 			p.ClearPlacements(obj.Key)
@@ -277,6 +301,7 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		}
 		log.Trace("Set %s, placements: %v.", obj.Key, placements)
 		p.SetPlacements(obj.Key, placements)
+		atomic.AddInt32(&keySets, 1)
 		return "set", reqId, PerformResultSuccess
 	}
 }
@@ -702,9 +727,9 @@ func main() {
 	minMem := float64(10000000000000)
 	maxChunks := float64(0)
 	minChunks := float64(1000)
-	set := 0
-	got := uint64(0)
-	reset := uint64(0)
+	setChunks := 0
+	gotChunks := uint64(0)
+	resetChunks := uint64(0)
 	activated := 0
 	var balancerCost time.Duration
 	for i := 0; i < len(proxies); i++ {
@@ -716,16 +741,17 @@ func main() {
 			maxMem = math.Max(maxMem, float64(lambda.MemUsed))
 			minChunks = math.Min(minChunks, float64(lambda.NumChunks()))
 			maxChunks = math.Max(maxChunks, float64(lambda.NumChunks()))
-			set += lambda.NumChunks()
+			setChunks += lambda.NumChunks()
 			for chk := range lambda.AllChunks() {
-				got += chk.Value.(*proxy.Chunk).Freq
-				reset += chk.Value.(*proxy.Chunk).Reset
+				gotChunks += chk.Value.(*proxy.Chunk).Freq
+				resetChunks += chk.Value.(*proxy.Chunk).Reset
 			}
 			activated += lambda.ActiveMinutes
 		}
+		setChunks += prxy.NumEvicts()
 		for chk := range prxy.AllEvicts() {
-			got += chk.Value.(*proxy.Chunk).Freq
-			reset += chk.Value.(*proxy.Chunk).Reset
+			gotChunks += chk.Value.(*proxy.Chunk).Freq
+			resetChunks += chk.Value.(*proxy.Chunk).Reset
 		}
 		balancerCost += prxy.BalancerCost
 		prxy.Close()
@@ -735,7 +761,9 @@ func main() {
 	syslog.Printf("Total memory consumed: %s\n", humanize.Bytes(uint64(totalMem)))
 	syslog.Printf("Memory consumed per lambda: %s - %s\n", humanize.Bytes(uint64(minMem)), humanize.Bytes(uint64(maxMem)))
 	syslog.Printf("Chunks per lambda: %d - %d\n", int(minChunks), int(maxChunks))
-	syslog.Printf("Set %d, Got %d, Reset %d\n", set, got, reset)
+	syslog.Printf("Chunks set %d, got %d, reset %d, hit ratio %d%%\n", setChunks, gotChunks, resetChunks, gotChunks*100/(gotChunks+resetChunks))
+	syslog.Printf("Puts total %d, succeeded %d\n", sets, keySets)
+	syslog.Printf("Gets total %d, succeeded %d, miss %d, hit ratio %d%%\n", gets, keyGets, keyMiss, keyGets*100/gets)
 	syslog.Printf("Active Minutes %d\n", activated)
 	syslog.Printf("BalancerCost: %s(%s per request)", balancerCost, balancerCost/time.Duration(read-options.Skip))
 	syslog.Printf("Max concurrency: %d, clients initialized: %d\n", maxConcurrency, atomic.LoadInt32(&numClients))

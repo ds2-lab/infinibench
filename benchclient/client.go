@@ -84,7 +84,7 @@ func (c *defaultClient) EcSet(key string, val []byte, args ...interface{}) (stri
 	start := time.Now()
 	err := c.setter(key, val)
 	duration := time.Since(start)
-	nanoLog(logClient, "set", reqId, start.UnixNano(), duration.Nanoseconds(), len(val), resultFromError(err), c.abbr)
+	nanoLog(logClient, "set", key, start.UnixNano(), duration.Nanoseconds(), len(val), resultFromError(err), c.abbr)
 	if err != nil {
 		c.log.Error("Failed to upload: %v", err)
 		return reqId, err
@@ -116,7 +116,7 @@ func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinica
 	if reader != nil {
 		size = reader.Len()
 	}
-	nanoLog(logClient, "get", reqId, start.UnixNano(), duration.Nanoseconds(), size, resultFromError(err), c.abbr)
+	nanoLog(logClient, "get", key, start.UnixNano(), duration.Nanoseconds(), size, resultFromError(err), c.abbr)
 	if err != nil {
 		c.log.Error("failed to download: %v", err)
 		return reqId, nil, err
