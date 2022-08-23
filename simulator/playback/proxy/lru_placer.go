@@ -38,6 +38,7 @@ func (lru *LRUPlacer) Init() {
 		ins.Meta.ResetCapacity(lru.proxy.LambdaPool[i].Capacity, lru.proxy.LambdaPool[i].MemUsed)
 		group.Set(group.Reserve(i, ins))
 	}
+	// global.SetLoggerLevel(logger.LOG_LEVEL_ALL)
 	lru.instances = group.All()
 	lru.backend = metastore.NewLRUPlacer(metastore.New(), lru)
 

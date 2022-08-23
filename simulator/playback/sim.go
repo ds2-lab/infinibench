@@ -110,6 +110,8 @@ type Options struct {
 	SampleKey        uint64
 	FunctionCapacity uint64
 	FunctionOverhead uint64
+	Capacity         uint64
+	Speed            float64
 }
 
 type NanoLogProvider func(func(nanolog.Handle, ...interface{}) error)
@@ -378,14 +380,26 @@ func main() {
 	flag.StringVar(&options.TraceName, "trace", "IBMDockerRegistry", "type of trace: IBMDockerRegistry, IBMObjectStore, AzureFunctions")
 	flag.Uint64Var(&options.SampleFractions, "sf", 1, "enable sampling by raising fraction's denominator.")
 	flag.Uint64Var(&options.SampleKey, "sk", 0, "the key of sample")
-	flag.Uint64Var(&options.FunctionCapacity, "fc", 0, "specify the capacity of functions")
-	flag.Uint64Var(&options.FunctionOverhead, "fo", 0, "specify the overhead of functions")
+	flag.Uint64Var(&options.FunctionCapacity, "fc", 0, "specify the capacity(in MB) of functions")
+	flag.Uint64Var(&options.FunctionOverhead, "fo", 0, "specify the overhead(in MB) of functions")
+	flag.Uint64Var(&options.Capacity, "cap", 0, "specify the capacity(in MB) of storage, useful combined with -redis -dryrun")
+	flag.Float64Var(&options.Speed, "speed", 1, "the speed of replaying")
 
 	flag.Parse(os.Args[1:])
 
 	if options.Dryrun {
 		options.Lean = true
 		options.Compact = true
+		if options.Capacity > 0 {
+			// Use 1 function cluster with balancer to simulate a cache with limited capacity.
+			options.Redis = ""
+			options.FunctionCapacity = options.Capacity
+			options.FunctionOverhead = 0
+			options.Balance = true
+			options.Cluster = 1
+			options.Datashard = 1
+			options.Parityshard = 0
+		}
 	}
 
 	flag.BoolVar(&options.Lean, "lean", options.Lean, "run with minimum memory consumtion, valid only if dryrun=true")
@@ -570,7 +584,7 @@ func main() {
 		if obj.Size > options.ScaleFrom {
 			obj.Size = uint64(float64(obj.Size) * options.ScaleSz)
 		}
-		if obj.Size > options.MaxSz {
+		if options.MaxSz > 0 && obj.Size > options.MaxSz {
 			obj.Size = options.MaxSz
 		}
 		obj.DChunks = options.Datashard
@@ -595,7 +609,8 @@ func main() {
 			}
 
 			// Use absolute time span for accuracy: time difference in trace - skipped - time replayed
-			timeToStart = time.Duration(obj.Timestamp-firstTs) - skippedDuration - planned.Sub(start)
+			// Updated Aug 22, 2022: add speed factor, speed 10 means 10x faster than real time.
+			timeToStart = time.Duration(float64(obj.Timestamp-firstTs)/options.Speed) - skippedDuration - planned.Sub(start)
 			if timeToStart <= 0 {
 				timeToStart = 0
 			}
@@ -761,9 +776,9 @@ func main() {
 	syslog.Printf("Total memory consumed: %s\n", humanize.Bytes(uint64(totalMem)))
 	syslog.Printf("Memory consumed per lambda: %s - %s\n", humanize.Bytes(uint64(minMem)), humanize.Bytes(uint64(maxMem)))
 	syslog.Printf("Chunks per lambda: %d - %d\n", int(minChunks), int(maxChunks))
-	syslog.Printf("Chunks set %d, got %d, reset %d, hit ratio %d%%\n", setChunks, gotChunks, resetChunks, gotChunks*100/(gotChunks+resetChunks))
+	syslog.Printf("Chunks set %d, got %d, reset %d, hit ratio %.2f%%\n", setChunks, gotChunks, resetChunks, float64(gotChunks*100)/float64(gotChunks+resetChunks))
 	syslog.Printf("Puts total %d, succeeded %d\n", sets, keySets)
-	syslog.Printf("Gets total %d, succeeded %d, miss %d, hit ratio %d%%\n", gets, keyGets, keyMiss, keyGets*100/gets)
+	syslog.Printf("Gets total %d, succeeded %d, miss %d, hit ratio %.2f%%\n", gets, keyGets, keyMiss, float64(keyGets*100)/float64(gets))
 	syslog.Printf("Active Minutes %d\n", activated)
 	syslog.Printf("BalancerCost: %s(%s per request)", balancerCost, balancerCost/time.Duration(read-options.Skip))
 	syslog.Printf("Max concurrency: %d, clients initialized: %d\n", maxConcurrency, atomic.LoadInt32(&numClients))
