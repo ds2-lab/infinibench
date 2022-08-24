@@ -16,6 +16,8 @@ var (
 		SharedConfigState: session.SharedConfigEnable,
 		Config:            aws.Config{Region: aws.String("us-east-1")},
 	}))
+	downloadBufferProvider = s3manager.NewPooledBufferedWriterReadFromProvider(1024)
+	uploadBufferProvider   = s3manager.NewBufferedReadSeekerWriteToPool(1024)
 )
 
 type S3 struct {
@@ -29,8 +31,12 @@ func NewS3(bk string) *S3 {
 	client := &S3{
 		defaultClient: newDefaultClient("S3: "),
 		bucket:        bk,
-		uploader:      s3manager.NewUploader(AWSSession),
-		downloader:    s3manager.NewDownloader(AWSSession),
+		uploader: s3manager.NewUploader(AWSSession, func(u *s3manager.Uploader) {
+			u.BufferProvider = uploadBufferProvider
+		}),
+		downloader: s3manager.NewDownloader(AWSSession, func(d *s3manager.Downloader) {
+			d.BufferProvider = downloadBufferProvider
+		}),
 	}
 	client.setter = client.set
 	client.getter = client.get
