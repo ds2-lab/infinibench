@@ -112,6 +112,7 @@ type Options struct {
 	FunctionOverhead uint64
 	Capacity         uint64
 	Speed            float64
+	Checkpoint       string
 }
 
 type NanoLogProvider func(func(nanolog.Handle, ...interface{}) error)
@@ -120,6 +121,7 @@ type FinalizeOptions struct {
 	once         sync.Once
 	closeNanolog bool
 	traceFile    *os.File
+	checkpoint   *helpers.Checkpoint
 }
 
 type Member string
@@ -133,6 +135,23 @@ type hasher struct{}
 
 func (h hasher) Sum64(data []byte) uint64 {
 	return xxhash.Sum64(data)
+}
+
+func restore(opts *Options, p *proxy.Proxy, obj *proxy.Object, dummyPlacement []uint64) {
+	if _, seen := p.Placements(obj.Key); !seen {
+		chkKey := fmt.Sprintf("%d@%s", 0, obj.Key)
+		chk := &proxy.Chunk{
+			Key:  chkKey,
+			Sz:   obj.ChunkSz,
+			Freq: 0,
+		}
+		p.LambdaPool[0].AddChunk(chk, fmt.Sprintf("i: %d, idx: %d", 0, 0))
+		if opts.Dryrun && opts.Balance {
+			p.Adapt(0, chk)
+		}
+		p.SetPlacements(obj.Key, dummyPlacement)
+		log.Info("Restored set object: %s", obj.Key)
+	}
 }
 
 func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.Object) (string, string, int) {
@@ -384,6 +403,7 @@ func main() {
 	flag.Uint64Var(&options.FunctionOverhead, "fo", 0, "specify the overhead(in MB) of functions")
 	flag.Uint64Var(&options.Capacity, "cap", 0, "specify the capacity(in MB) of storage, useful combined with -redis -dryrun")
 	flag.Float64Var(&options.Speed, "speed", 1, "the speed of replaying")
+	flag.StringVar(&options.Checkpoint, "checkpoint", "", "the checkpoint file that enables continue from where stopped.")
 
 	flag.Parse(os.Args[1:])
 
@@ -511,6 +531,16 @@ func main() {
 		reader = readers.NewIBMDockerRegistryReader(traceFile)
 	}
 
+	// Open checkpoint file
+	var checkpoint *helpers.Checkpoint
+	var dummyPlacement []uint64
+	if options.Checkpoint != "" {
+		checkpoint = helpers.NewCheckpoint(options.Checkpoint)
+		dummyPlacement = make([]uint64, options.Datashard+options.Parityshard)
+		finalizeOptions.checkpoint = checkpoint
+		log.Info("Checkpoint enabled: executed %d", checkpoint.Checked())
+	}
+
 	timer := time.NewTimer(0)
 	requestsCleared := make(chan time.Time, 1) // To be notified that all invoked requests were responded.
 	read := int64(0)
@@ -616,7 +646,9 @@ func main() {
 			}
 
 			// On skiping, use elapsed to record time.
-			if read <= options.Skip {
+			if checkpoint != nil && checkpoint.Seen(read) {
+				skippedDuration += timeToStart
+			} else if read <= options.Skip {
 				skippedDuration += timeToStart
 				if timeToStart > 0 {
 					log.Info("Skip %d: %v", read, timeToStart)
@@ -630,8 +662,13 @@ func main() {
 			}
 		}
 
-		// Playback
-		if read > options.Skip {
+		// Playback. If checkpoint is available, skip executed requests.
+		if checkpoint != nil && checkpoint.Seen(read) {
+			member := ring.LocateKey([]byte(obj.Key))
+			hostId := member.String()
+			id, _ := strconv.Atoi(hostId)
+			restore(options, proxies[id], obj, dummyPlacement)
+		} else if read > options.Skip {
 			if startTs == 0 {
 				startTs = obj.Timestamp
 			}
@@ -702,9 +739,16 @@ func main() {
 				}
 
 				actural := skippedDuration + time.Since(start)
-				log.Info("%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
+				checked := int64(0)
+				if checkpoint != nil {
+					checked = checkpoint.Checked()
+				}
+				log.Info("%d/%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", checked, sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
 				_, reqId, _ := perform(options, cli, p, obj)
+				if checkpoint != nil {
+					checkpoint.CheckSync(sn)
+				}
 				clientPools[0].Put(cli)
 				if notifier != nil {
 					notifier.Wait()
@@ -796,6 +840,11 @@ func finalize(opts *FinalizeOptions) {
 		if opts.closeNanolog {
 			nanolog.Flush()
 			opts.closeNanolog = false
+		}
+
+		if opts.checkpoint != nil {
+			opts.checkpoint.Close()
+			opts.checkpoint = nil
 		}
 
 		if opts.traceFile != nil {
