@@ -538,7 +538,7 @@ func main() {
 		checkpoint = helpers.NewCheckpoint(options.Checkpoint)
 		dummyPlacement = make([]uint64, options.Datashard+options.Parityshard)
 		finalizeOptions.checkpoint = checkpoint
-		log.Info("Checkpoint enabled: executed %d", checkpoint.Checked())
+		log.Info("Checkpoint enabled: executed %d", checkpoint.Frontier())
 	}
 
 	timer := time.NewTimer(0)
@@ -739,11 +739,11 @@ func main() {
 				}
 
 				actural := skippedDuration + time.Since(start)
-				checked := int64(0)
+				frontier := int64(0)
 				if checkpoint != nil {
-					checked = checkpoint.Checked()
+					frontier = checkpoint.Frontier()
 				}
-				log.Info("%d/%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", checked, sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
+				log.Info("%d/%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", frontier, sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
 				_, reqId, _ := perform(options, cli, p, obj)
 				clientPools[0].Put(cli)

@@ -12,7 +12,7 @@ type Checkpoint struct {
 	file     *os.File
 	executed []bool
 	tracker  chan int64
-	checked  int64
+	frontier int64
 }
 
 func NewCheckpoint(path string) *Checkpoint {
@@ -24,7 +24,7 @@ func NewCheckpoint(path string) *Checkpoint {
 		file:     file,
 		executed: make([]bool, 10000),
 		tracker:  make(chan int64, 1000),
-		checked:  0,
+		frontier: 0,
 	}
 	checkpoint.Load()
 	go checkpoint.Track()
@@ -53,7 +53,9 @@ func (c *Checkpoint) Load() {
 			c.executed = newExecuted
 		}
 		c.executed[index] = true
-		c.checked++
+		if index > c.frontier {
+			c.frontier = index
+		}
 	}
 }
 
@@ -64,7 +66,9 @@ func (c *Checkpoint) Track() {
 		}
 		c.file.WriteString(strconv.FormatInt(index, 10))
 		c.file.WriteString("\n")
-		c.checked++
+		if index > c.frontier {
+			c.frontier = index
+		}
 	}
 }
 
@@ -80,9 +84,9 @@ func (c *Checkpoint) Seen(index int64) bool {
 	return false
 }
 
-// Checked returns the number of checked indexes.
-func (c *Checkpoint) Checked() int64 {
-	return c.checked
+// Frontier returns the max index of checked indexes.
+func (c *Checkpoint) Frontier() int64 {
+	return c.frontier
 }
 
 func (c *Checkpoint) Close() {
