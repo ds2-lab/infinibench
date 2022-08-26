@@ -59,6 +59,16 @@ func (p *Pool) Get() interface{} {
 	}
 }
 
+func (p *Pool) Release(i interface{}) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.allocated--
+	if p.Finalize != nil {
+		p.Finalize(i)
+	}
+}
+
 func (p *Pool) Put(i interface{}) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

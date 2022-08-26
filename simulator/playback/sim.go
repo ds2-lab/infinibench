@@ -550,13 +550,13 @@ func main() {
 	var concurrency int32
 	var maxConcurrency int32
 	// cond := sync.NewCond(&sync.Mutex{})
-	var close bool
+	var closed bool
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGABRT)
 	go func() {
 		<-sig
 		log.Info("Receive signal, stop server...")
-		close = true
+		closed = true
 	}()
 	var skipper *helpers.TimeSkipper
 	if options.Dryrun && options.Compact && options.Bandwidth > 0 {
@@ -574,7 +574,7 @@ func main() {
 		stopAt = time.Duration(options.LimitHour) * time.Hour
 	}
 	for {
-		if close {
+		if closed {
 			// Close check
 			break
 		} else if stop > 0 && read >= stop {
@@ -745,8 +745,20 @@ func main() {
 				}
 				log.Info("%d/%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", frontier, sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
-				_, reqId, _ := perform(options, cli, p, obj)
-				clientPools[0].Put(cli)
+				// Safeguard against timeout.
+				performed := make(chan struct{})
+				var reqId string
+				go func(done chan struct{}) {
+					_, reqId, _ = perform(options, cli, p, obj)
+					close(done)
+				}(performed)
+				select {
+				case <-performed:
+					clientPools[0].Put(cli)
+				case <-time.After(30 * time.Second):
+					log.Warn("Timeout playbacking %d:%s", sn, obj.Key)
+					clientPools[0].Release(cli)
+				}
 				if notifier != nil {
 					notifier.Wait()
 					// log.Debug("Skipped %d:%s", sn, obj.Key)
