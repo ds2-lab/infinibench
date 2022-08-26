@@ -394,7 +394,7 @@ func main() {
 	flag.BoolVar(&options.Dummy, "dummy", false, "using Dummy client for simulation")
 	flag.StringVar(&options.Failover, "failover", "", "specify the failover service in case the main service failed. The failover service can be s3 and must be enabled in parameters.")
 	flag.BoolVar(&options.Balance, "balance", false, "enable balancer on dryrun")
-	flag.IntVar(&options.Concurrency, "c", 100, "max concurrency allowed, minimum 1.")
+	flag.IntVar(&options.Concurrency, "c", 1000, "max concurrency allowed, minimum 1.")
 	flag.Int64Var(&options.Bandwidth, "w", 0, "unit bandwidth per shard in MiB/s. 0 for unlimited bandwidth")
 	flag.StringVar(&options.TraceName, "trace", "IBMDockerRegistry", "type of trace: IBMDockerRegistry, IBMObjectStore, AzureFunctions")
 	flag.Uint64Var(&options.SampleFractions, "sf", 1, "enable sampling by raising fraction's denominator.")
@@ -746,9 +746,6 @@ func main() {
 				log.Info("%d/%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", checked, sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
 				_, reqId, _ := perform(options, cli, p, obj)
-				if checkpoint != nil {
-					checkpoint.CheckSync(sn)
-				}
 				clientPools[0].Put(cli)
 				if notifier != nil {
 					notifier.Wait()
@@ -765,7 +762,15 @@ func main() {
 						requestsCleared <- time.Now()
 					}
 				}
+
+				// Mark executed in checkpoint file.
+				if checkpoint != nil {
+					checkpoint.CheckSync(sn)
+				}
+
+				// Log
 				log.Debug("csv,%s,%s,%d,%d,%d", reqId, obj.Key, expected, actural, obj.Size)
+
 				reader.Done(obj.Record)
 				obj.Record = nil
 				// cond.Signal()
