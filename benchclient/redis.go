@@ -10,6 +10,10 @@ import (
 	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
+var (
+	PoolSize = 1
+)
+
 func GenRedisClusterSlotsProviderByAddresses(addrs []string, numSlots int) RedisClusterSlotsProvider {
 	var cached []redis.ClusterSlot
 	return func(ctx context.Context) ([]redis.ClusterSlot, error) {
@@ -75,6 +79,7 @@ func NewRedis(addr string) *Redis {
 	backend := redis.NewClient(&redis.Options{
 		Addr:     addr,
 		Password: "", // no password set
+		PoolSize: PoolSize,
 	})
 	return NewRedisWithBackend(backend)
 }
@@ -83,6 +88,7 @@ func NewRedisClusterByAddresses(addrs []string, numSlots int) *Redis {
 	backend := redis.NewClusterClient(&redis.ClusterOptions{
 		ClusterSlots:  GenRedisClusterSlotsProviderByAddresses(addrs, numSlots),
 		RouteRandomly: true,
+		PoolSize:      PoolSize,
 	})
 	return NewRedisWithBackend(backend)
 }
@@ -91,6 +97,7 @@ func NewElasticCache(addrPattern string, nodes int, numSlots int) *Redis {
 	backend := redis.NewClusterClient(&redis.ClusterOptions{
 		ClusterSlots:  GenElasticCacheClusterSlotsProvider(addrPattern, nodes, numSlots),
 		RouteRandomly: true,
+		PoolSize:      PoolSize,
 	})
 	return NewRedisWithBackend(backend)
 }
