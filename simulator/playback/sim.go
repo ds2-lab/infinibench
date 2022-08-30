@@ -66,7 +66,7 @@ var (
 		Level:   logger.LOG_LEVEL_ALL,
 		Color:   true,
 	}
-	clientPools               []*proxy.Pool
+	clientPools               []proxy.Pool
 	numClients                int32
 	keySets, keyGets, keyMiss int32
 	sets, gets                int32
@@ -443,7 +443,7 @@ func main() {
 		log.Verbose = false
 		log.Level = logger.LOG_LEVEL_WARN
 	}
-	if options.Concurrency <= 0 {
+	if options.Concurrency < 0 {
 		options.Concurrency = 1
 	}
 	options.Bandwidth *= 1024 * 1024 * int64(options.Datashard+options.Parityshard)
@@ -468,7 +468,7 @@ func main() {
 		benchclient.ResetDummySizeRegistry()
 	}
 	clientProviders := BuildClientProviders(options)
-	clientPools = make([]*proxy.Pool, 1, 2)
+	clientPools = make([]proxy.Pool, 1, 2)
 	// Initiate failover client pool
 	if options.Failover != "" {
 		provider, ok := clientProviders[strings.ToLower(options.Failover)]
@@ -477,7 +477,7 @@ func main() {
 			os.Exit(1)
 			return
 		}
-		clientPools = append(clientPools, proxy.InitPool(&proxy.Pool{
+		clientPools = append(clientPools, proxy.InitPool(&proxy.ConcurrencyPool{
 			New: func() interface{} {
 				// Only count the main pool.
 				// atomic.AddInt32(&numClients, 1)
@@ -499,7 +499,7 @@ func main() {
 	}
 	// Initiate main client pool
 	for key, provider := range clientProviders {
-		clientPools[0] = proxy.InitPool(&proxy.Pool{
+		clientPools[0] = proxy.InitPool(&proxy.ConcurrencyPool{
 			New: func() interface{} {
 				atomic.AddInt32(&numClients, 1)
 				return provider()

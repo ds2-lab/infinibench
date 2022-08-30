@@ -3,40 +3,58 @@ package proxy
 import "sync"
 
 var (
+	PoolForPerformance       = PoolPerformanceOption(0)
 	PoolForStrictConcurrency = PoolPerformanceOption(1)
-	PoolForPerformance       = PoolPerformanceOption(2)
 )
 
 type PoolPerformanceOption int
 
-type Pool struct {
+type Pool interface {
+	Get() interface{}
+	Release(i interface{})
+	Put(i interface{})
+	Close()
+}
+
+type ConcurrencyPool struct {
 	New      func() interface{}
 	Finalize func(interface{})
 
 	capacity  int
 	allocated int
 	pooled    chan interface{}
+	opt       PoolPerformanceOption
 
 	mu   sync.Mutex
 	cond *sync.Cond
 }
 
-func NewPool(cap int, opt PoolPerformanceOption) *Pool {
-	return (&Pool{}).init(cap, opt)
+func NewPool(cap int, opt PoolPerformanceOption) Pool {
+	if cap == 0 {
+		return &NilPool{}
+	}
+	return (&ConcurrencyPool{}).init(cap, opt)
 }
 
-func InitPool(p *Pool, cap int, opt PoolPerformanceOption) *Pool {
+func InitPool(p *ConcurrencyPool, cap int, opt PoolPerformanceOption) Pool {
+	if cap == 0 {
+		return &NilPool{
+			New:      p.New,
+			Finalize: p.Finalize,
+		}
+	}
 	return p.init(cap, opt)
 }
 
-func (p *Pool) init(cap int, opt PoolPerformanceOption) *Pool {
-	p.capacity = cap * int(opt)
+func (p *ConcurrencyPool) init(cap int, opt PoolPerformanceOption) *ConcurrencyPool {
+	p.capacity = cap
 	p.pooled = make(chan interface{}, p.capacity)
+	p.opt = opt
 	p.cond = sync.NewCond(&p.mu)
 	return p
 }
 
-func (p *Pool) Get() interface{} {
+func (p *ConcurrencyPool) Get() interface{} {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -45,7 +63,7 @@ func (p *Pool) Get() interface{} {
 		case i := <-p.pooled:
 			return i
 		default:
-			if p.allocated < p.capacity {
+			if p.allocated < p.capacity || p.opt&PoolForStrictConcurrency == 0 {
 				p.allocated++
 				if p.New == nil {
 					return nil
@@ -59,7 +77,7 @@ func (p *Pool) Get() interface{} {
 	}
 }
 
-func (p *Pool) Release(i interface{}) {
+func (p *ConcurrencyPool) Release(i interface{}) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -69,7 +87,7 @@ func (p *Pool) Release(i interface{}) {
 	}
 }
 
-func (p *Pool) Put(i interface{}) {
+func (p *ConcurrencyPool) Put(i interface{}) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -84,7 +102,7 @@ func (p *Pool) Put(i interface{}) {
 	}
 }
 
-func (p *Pool) Close() {
+func (p *ConcurrencyPool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -97,5 +115,33 @@ func (p *Pool) Close() {
 	}
 }
 
-func (p *Pool) defaultFinalizer(i interface{}) {
+func (p *ConcurrencyPool) defaultFinalizer(i interface{}) {
+}
+
+type NilPool struct {
+	New      func() interface{}
+	Finalize func(interface{})
+}
+
+func (p *NilPool) Get() interface{} {
+	if p.New == nil {
+		return nil
+	} else {
+		return p.New()
+	}
+}
+
+func (p *NilPool) Release(i interface{}) {
+	if p.Finalize != nil {
+		p.Finalize(i)
+	}
+}
+
+func (p *NilPool) Put(i interface{}) {
+	if p.Finalize != nil {
+		p.Finalize(i)
+	}
+}
+
+func (p *NilPool) Close() {
 }

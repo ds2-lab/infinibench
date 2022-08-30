@@ -3,7 +3,6 @@ package benchclient
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 
 	"github.com/go-redis/redis/v8"
@@ -11,6 +10,7 @@ import (
 )
 
 var (
+	// Default to disable client pooling.
 	PoolSize = 1
 )
 
@@ -43,7 +43,7 @@ func GenRedisClusterSlotsProviderByAddresses(addrs []string, numSlots int) Redis
 			}}
 		}
 		cached = slots
-		log.Printf("Confirmed redis cluster slots: %v", cached)
+		// log.Printf("Confirmed redis cluster slots: %v", cached)
 		return cached, nil
 	}
 }
