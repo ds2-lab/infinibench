@@ -19,12 +19,15 @@ type ClientProvider func() benchclient.Client
 func BuildClientProviders(options *Options) map[string]ClientProvider {
 	m := make(map[string]ClientProvider)
 	if options.S3 != "" {
+		log.Info("Preparing S3 client for bucket %s...", options.S3)
 		m[ProviderS3] = GenS3ClientProvider(options.S3)
 	}
 	if options.Redis != "" {
+		log.Info("Preparing Redis client for cluster %s...", options.Redis)
 		m[ProviderRedis] = GenRedisClientProvider(options.Redis, options.RedisCluster)
 	}
 	if options.Dummy {
+		log.Info("Preparing Dummy client with bandwidth %d...", options.Bandwidth)
 		m[ProviderDummy] = GenDummyClientProvider(options.Bandwidth, benchclient.DummyStore)
 	}
 	if len(m) == 0 {
@@ -59,6 +62,7 @@ func GenDummyClientProvider(bandwidth int64, t string) ClientProvider {
 
 func GenDefaultClientProvider(options *Options) ClientProvider {
 	addrArr := strings.Split(options.AddrList, ",")
+	log.Info("Preparing InfiniCache client with address %s...", options.AddrList)
 	return func() benchclient.Client {
 		cli := client.NewClient(options.Datashard, options.Parityshard, options.ECmaxgoroutine)
 		if !options.Dryrun {
