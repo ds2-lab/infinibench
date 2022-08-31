@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mason-leap-lab/infinicache/common/util/promise"
+	"github.com/mason-leap-lab/go-utils/promise"
 	"github.com/wangaoone/redbench/simulator/readers"
 	"github.com/zhangjyr/hashmap"
 
@@ -128,7 +128,7 @@ type Proxy struct {
 	BalancerCost time.Duration
 
 	evicts     *hashmap.HashMap // map[string]*Chunk, evicted chunks
-	placements *hashmap.HashMap // map[string][]int, placements of keys
+	placements *sync.Map        // map[string][]int, placements of keys
 	cleared    *hashmap.HashMap // map[string]bool, cleared keys
 	mu         sync.Mutex
 }
@@ -138,7 +138,7 @@ func NewProxy(id string, numCluster int, balancer ProxyBalancer) *Proxy {
 		Id:         id,
 		LambdaPool: make([]*Lambda, numCluster),
 		Balancer:   balancer,
-		placements: hashmap.New(1024),
+		placements: &sync.Map{},
 		evicts:     hashmap.New(1024),
 		cleared:    hashmap.New(1024),
 	}
@@ -214,13 +214,15 @@ func (p *Proxy) Validate(obj *Object) bool {
 // to unlock blocked calls.
 func (p *Proxy) Placements(key string) ([]uint64, bool) {
 	// A successful insertion can proceed, or it should wait.
-	if v, ok := p.placements.GetOrInsert(key, promise.NewPromise()); !ok {
+	temp := promise.NewPromise()
+	if v, ok := p.placements.LoadOrStore(key, temp); !ok {
 		if _, cleared := p.cleared.Get(key); cleared {
 			return nil, true
 		} else {
 			return nil, false
 		}
 	} else {
+		promise.Recycle(temp)
 		if ret, err := v.(promise.Promise).Result(); err == nil {
 			return ret.([]uint64), true
 		} else {
@@ -231,7 +233,7 @@ func (p *Proxy) Placements(key string) ([]uint64, bool) {
 }
 
 func (p *Proxy) SetPlacements(key string, placements []uint64) error {
-	if v, ok := p.placements.Get(key); !ok {
+	if v, ok := p.placements.Load(key); !ok {
 		return ErrNoPlacementsTest
 	} else {
 		v.(promise.Promise).Resolve(placements)
@@ -240,11 +242,11 @@ func (p *Proxy) SetPlacements(key string, placements []uint64) error {
 }
 
 func (p *Proxy) ResetPlacements(key string, placements []uint64) error {
-	if v, ok := p.placements.Get(key); !ok {
+	if v, ok := p.placements.Load(key); !ok {
 		return ErrNoPlacementsTest
 	} else if v.(promise.Promise).IsResolved() {
 		ret := promise.Resolved(placements)
-		p.placements.Set(key, ret)
+		p.placements.Store(key, ret)
 		return nil
 	} else {
 		p.cleared.Del(key)
@@ -255,8 +257,8 @@ func (p *Proxy) ResetPlacements(key string, placements []uint64) error {
 
 func (p *Proxy) ClearPlacements(key string) {
 	p.cleared.Set(key, true)
-	v, ok := p.placements.Get(key)
-	p.placements.Del(key)
+	v, ok := p.placements.Load(key)
+	p.placements.Delete(key)
 	if ok && !v.(promise.Promise).IsResolved() {
 		v.(promise.Promise).Resolve(nil, ErrPlacementsCleared)
 	}

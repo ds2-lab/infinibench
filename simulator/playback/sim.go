@@ -22,6 +22,7 @@ SOFTWARE.
 package main
 
 import (
+	"context"
 	sysflag "flag"
 	"fmt"
 	"io"
@@ -32,7 +33,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
+	syssync "sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -42,6 +43,8 @@ import (
 	"github.com/cespare/xxhash"
 	"github.com/dustin/go-humanize"
 	"github.com/mason-leap-lab/go-utils/logger"
+	"github.com/mason-leap-lab/go-utils/promise"
+	"github.com/mason-leap-lab/go-utils/sync"
 	"github.com/mason-leap-lab/infinicache/client"
 	"github.com/mason-leap-lab/infinicache/proxy/global"
 	"github.com/wangaoone/redbench/benchclient"
@@ -66,13 +69,14 @@ var (
 		Level:   logger.LOG_LEVEL_ALL,
 		Color:   true,
 	}
-	clientPools               []proxy.Pool
+	clientPools               []sync.WaitPool[benchclient.Client]
 	numClients                int32
 	keySets, keyGets, keyMiss int32
 	sets, gets                int32
 )
 
 func init() {
+	promise.InitPool(65535)
 	global.Log = log
 }
 
@@ -118,7 +122,7 @@ type Options struct {
 type NanoLogProvider func(func(nanolog.Handle, ...interface{}) error)
 
 type FinalizeOptions struct {
-	once         sync.Once
+	once         syssync.Once
 	closeNanolog bool
 	traceFile    *os.File
 	checkpoint   *helpers.Checkpoint
@@ -186,13 +190,14 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 			atomic.AddInt32(&keyMiss, 1)
 			var val []byte
 			if len(clientPools) > 1 {
-				cli := clientPools[1].Get().(benchclient.Client)
-				_, reader, _ := cli.EcGet(obj.Key, dryrun)
+				bakcli, _ := clientPools[1].Get(context.TODO())
+				clientPools[1].Put(bakcli)
+
+				_, reader, _ := bakcli.EcGet(obj.Key, dryrun)
 				if reader != nil {
 					val, _ = reader.ReadAll()
 					reader.Close()
 				}
-				clientPools[1].Put(cli)
 			}
 
 			if val == nil && !opts.Lean {
@@ -287,9 +292,15 @@ func perform(opts *Options, cli benchclient.Client, p *proxy.Proxy, obj *proxy.O
 		placements := make([]uint64, len(placements32))
 		if len(clientPools) > 1 {
 			go func(key string, val []byte) {
-				cli := clientPools[1].Get().(benchclient.Client)
+				cli, err := clientPools[1].Get(context.TODO())
+				if err != nil {
+					log.Warn("Failed to get failover client: %v", err)
+					return
+				}
+				defer clientPools[1].Put(cli)
+
+				// Set to failover client
 				cli.EcSet(key, val, dryrun)
-				clientPools[1].Put(cli)
 			}(obj.Key, val)
 		}
 		atomic.AddInt32(&sets, 1)
@@ -468,7 +479,7 @@ func main() {
 		benchclient.ResetDummySizeRegistry()
 	}
 	clientProviders := BuildClientProviders(options)
-	clientPools = make([]proxy.Pool, 1, 2)
+	clientPools = make([]sync.WaitPool[benchclient.Client], 1, 2)
 	// Initiate failover client pool
 	if options.Failover != "" {
 		provider, ok := clientProviders[strings.ToLower(options.Failover)]
@@ -477,16 +488,16 @@ func main() {
 			os.Exit(1)
 			return
 		}
-		clientPools = append(clientPools, proxy.InitPool(&proxy.ConcurrencyPool{
-			New: func() interface{} {
+		clientPools = append(clientPools, initPool(options.Concurrency,
+			func() benchclient.Client {
 				// Only count the main pool.
 				// atomic.AddInt32(&numClients, 1)
 				return provider()
 			},
-			Finalize: func(c interface{}) {
-				c.(benchclient.Client).Close()
+			func(c benchclient.Client) {
+				c.Close()
 			},
-		}, options.Concurrency, proxy.PoolForStrictConcurrency))
+		))
 		delete(clientProviders, strings.ToLower(options.Failover))
 
 		if options.Failover == ProviderDummy {
@@ -499,15 +510,14 @@ func main() {
 	}
 	// Initiate main client pool
 	for key, provider := range clientProviders {
-		clientPools[0] = proxy.InitPool(&proxy.ConcurrencyPool{
-			New: func() interface{} {
+		clientPools[0] = initPool(options.Concurrency,
+			func() benchclient.Client {
 				atomic.AddInt32(&numClients, 1)
 				return provider()
 			},
-			Finalize: func(c interface{}) {
-				c.(benchclient.Client).Close()
-			},
-		}, options.Concurrency, proxy.PoolForStrictConcurrency)
+			func(c benchclient.Client) {
+				c.Close()
+			})
 		if key == ProviderDefault {
 			nanologProvider = client.SetLogger
 		}
@@ -549,7 +559,7 @@ func main() {
 	var startTs int64
 	var concurrency int32
 	var maxConcurrency int32
-	// cond := sync.NewCond(&sync.Mutex{})
+	// cond := syssync.NewCond(&syssync.Mutex{})
 	var closed bool
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGABRT)
@@ -664,9 +674,12 @@ func main() {
 
 		// Playback. If checkpoint is available, skip executed requests.
 		if checkpoint != nil && checkpoint.Seen(read) {
-			member := ring.LocateKey([]byte(obj.Key))
-			hostId := member.String()
-			id, _ := strconv.Atoi(hostId)
+			id := 0
+			if len(proxies) > 1 {
+				member := ring.LocateKey([]byte(obj.Key))
+				hostId := member.String()
+				id, _ = strconv.Atoi(hostId)
+			}
 			restore(options, proxies[id], obj, dummyPlacement)
 		} else if read > options.Skip {
 			if startTs == 0 {
@@ -706,16 +719,19 @@ func main() {
 				}
 			}
 
-			member := ring.LocateKey([]byte(obj.Key))
-			hostId := member.String()
-			id, _ := strconv.Atoi(hostId)
+			id := 0
+			if len(proxies) > 1 {
+				member := ring.LocateKey([]byte(obj.Key))
+				hostId := member.String()
+				id, _ = strconv.Atoi(hostId)
+			}
 
 			// Concurrency control
 			// cond.L.Lock()
 			// for options.Concurrency > 0 && atomic.LoadInt32(&concurrency) >= int32(options.Concurrency) {
 			// 	cond.Wait()
 			// }
-			cli := clientPools[0].Get().(benchclient.Client)
+			cli, _ := clientPools[0].Get(context.TODO())
 
 			// Start perform
 			var notifier *helpers.TimeSkipNotification
@@ -746,18 +762,23 @@ func main() {
 				log.Info("%d/%d(c:%d) Playbacking %v %s (expc %v, schd %v, actc %v)...", frontier, sn, c, obj.Key, humanize.Bytes(obj.Size), expected, scheduled, actural)
 
 				// Safeguard against timeout.
-				performed := make(chan struct{})
+				performed := promise.NewPromise()
+				performed.SetTimeout(30 * time.Second)
+				go func(performed promise.Promise, cli benchclient.Client, p *proxy.Proxy, obj *proxy.Object) {
+					_, reqId, _ := perform(options, cli, p, obj)
+					performed.Resolve(reqId)
+				}(performed, cli, p, obj)
+
+				// Wait for the request to be performed.
 				var reqId string
-				go func(done chan struct{}) {
-					_, reqId, _ = perform(options, cli, p, obj)
-					close(done)
-				}(performed)
-				select {
-				case <-performed:
-					clientPools[0].Put(cli)
-				case <-time.After(30 * time.Second):
+				timeoutErr := performed.Timeout()
+				if timeoutErr != nil {
 					log.Warn("Timeout playbacking %d:%s", sn, obj.Key)
 					clientPools[0].Release(cli)
+				} else {
+					reqId = performed.Value().(string)
+					promise.Recycle(performed)
+					clientPools[0].Put(cli)
 				}
 				if notifier != nil {
 					notifier.Wait()
@@ -783,8 +804,11 @@ func main() {
 				// Log
 				log.Debug("csv,%s,%s,%d,%d,%d", reqId, obj.Key, expected, actural, obj.Size)
 
-				reader.Done(obj.Record)
-				obj.Record = nil
+				// Do not recycle the record if timeout, for the program is still running.
+				if timeoutErr == nil {
+					reader.Done(obj.Record)
+					obj.Record = nil
+				}
 				// cond.Signal()
 			}(read, cli, proxies[id], obj, time.Duration(obj.Timestamp-firstTs), skippedDuration+now.Sub(start), notifier)
 
@@ -849,6 +873,14 @@ func main() {
 
 	for _, p := range clientPools {
 		p.Close()
+	}
+}
+
+func initPool(concurrency int, provider ClientProvider, closer func(benchclient.Client)) sync.WaitPool[benchclient.Client] {
+	if concurrency == 0 {
+		return &sync.NilPool[benchclient.Client]{New: provider, Closer: closer}
+	} else {
+		return sync.InitConcurrencyPool(&sync.CappedPool[benchclient.Client]{New: provider, Closer: closer}, concurrency)
 	}
 }
 
