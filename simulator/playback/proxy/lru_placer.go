@@ -1,9 +1,7 @@
 package proxy
 
 import (
-	"fmt"
 	syslog "log"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -60,14 +58,14 @@ func (lru *LRUPlacer) Remap(placements []uint64, obj *Object) []uint64 {
 				// _, _, _ = lru.backend.GetOrInsert(m.Key, m)
 
 				// Uncomment this to simulate proxy with eviction tracks.
-				_, postProcess, _ := lru.backend.Insert(m.Key, m)
+				_, postProcess, _ := lru.backend.Insert(m.VersioningKey(), m)
 				if postProcess != nil {
 					postProcess(lru.dropEvicted)
 				}
 
 				remapped.Done()
 			}
-		}(lru.backend.NewMeta(obj.Key, strconv.FormatUint(obj.Size, 10), obj.DChunks, obj.PChunks, i, int64(obj.ChunkSz), uint64(placements[i]), lru.proxy.Len()))
+		}(lru.backend.NewMeta("", obj.Key, int64(obj.Size), obj.DChunks, obj.PChunks, i, int64(obj.ChunkSz), uint64(placements[i]), lru.proxy.Len()))
 	}
 
 	remapped.Wait()
@@ -82,7 +80,7 @@ func (lru *LRUPlacer) Adapt(_ uint64, _ *Chunk) {
 
 func (lru *LRUPlacer) Validate(obj *Object) bool {
 	meta, ok := lru.backend.Get(obj.Key, 0)
-	return !ok || !meta.Deleted
+	return !ok || !meta.IsDeleted()
 }
 
 func (lru *LRUPlacer) Close() {
@@ -106,9 +104,9 @@ func (lru *LRUPlacer) simServe(incomes chan interface{}, done *sync.WaitGroup) {
 }
 
 func (lru *LRUPlacer) dropEvicted(meta *metastore.Meta) {
-	lru.proxy.ClearPlacements(meta.Key)
+	lru.proxy.ClearPlacements(meta.VersioningKey())
 	for i, lambdaId := range meta.Placement {
-		chk, ok := lru.proxy.LambdaPool[lambdaId].DelChunk(fmt.Sprintf("%d@%s", i, meta.Key))
+		chk, ok := lru.proxy.LambdaPool[lambdaId].DelChunk(meta.ChunkKey(i))
 		if ok {
 			lru.proxy.Evict(chk.Key, chk)
 		}
