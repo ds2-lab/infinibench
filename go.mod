@@ -1,10 +1,8 @@
 module github.com/wangaoone/redbench
 
-go 1.15
-
-replace github.com/mason-leap-lab/infinicache => ../../mason-leap-lab/infinicache
 go 1.18
 
+replace github.com/mason-leap-lab/infinicache => ../../mason-leap-lab/infinicache
 // replace github.com/mason-leap-lab/infinicache => github.com/wangaoone/LambdaObjectstore v1.2.0
 
 require (
@@ -36,5 +34,5 @@ require (
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/orcaman/concurrent-map v1.0.0 // indirect
-	golang.org/x/sys v0.0.0-20220412211240-33da011f77ad // indirect
+	golang.org/x/sys v0.2.0 // indirect
 )
