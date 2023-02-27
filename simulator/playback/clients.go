@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 
-	"github.com/mason-leap-lab/infinicache/client"
-	"github.com/wangaoone/redbench/benchclient"
+	"github.com/ds2-lab/infinibench/benchclient"
+	"github.com/ds2-lab/infinistore/client"
 )
 
 const (

@@ -5,11 +5,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ds2-lab/infinistore/proxy/lambdastore"
+	"github.com/ds2-lab/infinistore/proxy/server/cluster"
+	"github.com/ds2-lab/infinistore/proxy/server/metastore"
+	"github.com/ds2-lab/infinistore/proxy/types"
 	"github.com/mason-leap-lab/go-utils/mapreduce"
-	"github.com/mason-leap-lab/infinicache/proxy/lambdastore"
-	"github.com/mason-leap-lab/infinicache/proxy/server/cluster"
-	"github.com/mason-leap-lab/infinicache/proxy/server/metastore"
-	"github.com/mason-leap-lab/infinicache/proxy/types"
 )
 
 type LRUPlacer struct {
@@ -32,7 +32,7 @@ func (lru *LRUPlacer) Init() {
 	group := cluster.NewGroup(numCluster)
 	for i := group.StartIndex(); i < group.EndIndex(); i = i.Next() {
 		ins := lambdastore.NewInstance("SimInstance", uint64(i))
-		// Update capacity, overhead should be consistent between infinicache configuration and simulator.
+		// Update capacity, overhead should be consistent between infinistore configuration and simulator.
 		ins.Meta.ResetCapacity(lru.proxy.LambdaPool[i].Capacity, lru.proxy.LambdaPool[i].MemUsed)
 		group.Set(group.Reserve(i, ins))
 	}
@@ -140,6 +140,14 @@ func (lru *LRUPlacer) GetBackupCandidates() mapreduce.Iterator {
 
 func (lru *LRUPlacer) GetDelegates() []*lambdastore.Instance {
 	return nil
+}
+
+func (lru *LRUPlacer) GetPersistCache() types.PersistCache {
+	return nil
+}
+
+func (lru *LRUPlacer) GetServePort(uint64) int {
+	return 0
 }
 
 func (lru *LRUPlacer) nextSlice(sliceSize int) (int, int) {

@@ -1,5 +1,4 @@
-*.xml
-redbench.iml
-*.csv
+simulator/playback/*.csv
 simulator/playback/playback
-redbench
+infinibench
+bin/

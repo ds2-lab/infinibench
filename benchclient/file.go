@@ -5,7 +5,7 @@ import (
 	"os"
 	"path"
 
-	infinicache "github.com/mason-leap-lab/infinicache/client"
+	infinistore "github.com/ds2-lab/infinistore/client"
 )
 
 type File struct {
@@ -36,7 +36,7 @@ func (c *File) set(key string, val []byte) (err error) {
 	return
 }
 
-func (c *File) get(key string) (reader infinicache.ReadAllCloser, err error) {
+func (c *File) get(key string) (reader infinistore.ReadAllCloser, err error) {
 	var file *os.File
 	if file, err = os.OpenFile(path.Join(c.basePath, key), os.O_RDONLY, 0); err != nil {
 		return

@@ -1,5 +1,27 @@
-//package redbench
 package main
+
+// MIT License
+//
+// Copyright (c) 2023 DS2 Lab @ UVA
+// Copyright (c) 2017 Josh Baker (https://github.com/tidwall/redbench)
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 import (
 	"flag"
@@ -16,17 +38,17 @@ import (
 	"time"
 
 	"github.com/ScottMansfield/nanolog"
+	infinistore "github.com/ds2-lab/infinistore/client"
 	"github.com/go-redis/redis/v8"
-	infinicache "github.com/mason-leap-lab/infinicache/client"
 
 	//"github.com/pkg/profile"
 
+	"github.com/ds2-lab/infinibench/benchclient"
 	"github.com/dustin/go-humanize"
-	"github.com/wangaoone/redbench/benchclient"
 )
 
 const (
-	CLIENT_INFINICACHE = "infinicache"
+	CLIENT_INFINICACHE = "infinistore"
 	CLIENT_REDIS       = "redis"
 	CLIENT_S3          = "s3"
 	CLIENT_ELASTICACHE = "elasticache"
@@ -47,7 +69,6 @@ type Options struct {
 	Datashard      int
 	Parityshard    int
 	ECmaxgoroutine int
-	Decoding       bool
 	Op             int
 	Quiet          bool
 	CSV            bool
@@ -63,7 +84,7 @@ type Options struct {
 // DefaultsOptions are the default options used by the Bench() function.
 var DefaultOptions = &Options{
 	AddrList:       "127.0.0.1:6378",
-	Bucket:         "mason-leap-lab.infinicache",
+	Bucket:         "",
 	Requests:       15,
 	Clients:        1,
 	Pipeline:       1,
@@ -73,7 +94,6 @@ var DefaultOptions = &Options{
 	Datashard:      4,
 	Parityshard:    2,
 	ECmaxgoroutine: 32,
-	Decoding:       true,
 	Op:             0, // 0: SET; 1: GET
 	Quiet:          false,
 	CSV:            false,
@@ -172,7 +192,7 @@ func Bench(
 		default:
 			addrArr := strings.Split(opts.AddrList, ",")
 			log.Println("number of hosts: ", len(addrArr))
-			ic := infinicache.NewClient(opts.Datashard, opts.Parityshard, opts.ECmaxgoroutine)
+			ic := infinistore.NewClient(opts.Datashard, opts.Parityshard, opts.ECmaxgoroutine)
 			ic.Dial(addrArr)
 			cli = ic
 		}
@@ -353,26 +373,27 @@ func AppendCommand(buf []byte, args ...string) []byte {
 }
 
 func helpInfo() {
-	fmt.Println("Usage: ./bench [options]")
+	fmt.Printf("Usage: %s [options]\n", os.Args[0])
 	fmt.Println("Option list: ")
-	fmt.Println("  -addrlist [ADDR:PORT,...]: server address:port")
-	fmt.Println("  -bucket: S3 bucket name")
-	fmt.Println("  -n [NUMBER]: number of requests")
-	fmt.Println("  -c [NUMBER]: number of concurrent clients")
-	fmt.Println("  -pipeline [NUMBER]: number of pipelined requests")
-	fmt.Println("  -keymin [NUMBER]: minimum key range")
-	fmt.Println("  -keymax [NUMBER]: maximum key range")
-	fmt.Println("  -sz [NUMBER]: object data size")
-	fmt.Println("  -d [NUMBER]: number of data shards for RS erasure coding")
-	fmt.Println("  -p [NUMBER]: number of parity shards for RS erasure coding")
-	fmt.Println("  -g [NUMBER]: max number of goroutines for RS erasure coding")
-	fmt.Println("  -dec: do decoding after Receive()?")
-	fmt.Println("  -op [0 or 1]: operation type (0: SET (load the data store); 1: GET)")
-	fmt.Println("  -log: print out debugging info?")
-	fmt.Println("  -file: print result to file")
-	fmt.Println("  -h: print out help info?")
-	fmt.Println("  -i: interval for every request (ms)")
-	fmt.Println("  -cli: client library used, try \"infinicache\" or \"redis\" or \"s3\" or \"elasticache\".")
+	flag.PrintDefaults()
+	// fmt.Println("  -n [NUMBER]: number of requests")
+	// fmt.Println("  -c [NUMBER]: number of concurrent clients")
+	// fmt.Println("  -addrlist [ADDR:PORT,...]: server address:port")
+	// fmt.Println("  -bucket: S3 bucket name")
+	// fmt.Println("  -pipeline [NUMBER]: number of pipelined requests")
+	// fmt.Println("  -keymin [NUMBER]: minimum key range")
+	// fmt.Println("  -keymax [NUMBER]: maximum key range")
+	// fmt.Println("  -sz [NUMBER]: object data size")
+	// fmt.Println("  -d [NUMBER]: number of data shards for RS erasure coding")
+	// fmt.Println("  -p [NUMBER]: number of parity shards for RS erasure coding")
+	// fmt.Println("  -g [NUMBER]: max number of goroutines for RS erasure coding")
+	// fmt.Println("  -dec: do decoding after Receive()?")
+	// fmt.Println("  -op [0 or 1]: operation type (0: SET (load the data store); 1: GET)")
+	// fmt.Println("  -log: print out debugging info?")
+	// fmt.Println("  -file: print result to file")
+	// fmt.Println("  -h: print out help info?")
+	// fmt.Println("  -i: interval for every request (ms)")
+	// fmt.Println("  -cli: client library used, try \"infinistore\" or \"redis\" or \"s3\" or \"elasticache\".")
 }
 
 func main() {
@@ -385,24 +406,23 @@ func main() {
 
 	options := DefaultOptions
 
-	flag.StringVar(&options.AddrList, "addrlist", "127.0.0.1:6378", "server address:port")
-	flag.StringVar(&options.Bucket, "bucket", "", "S3 bucket name")
-	flag.IntVar(&options.Requests, "n", 10, "number of requests")
-	flag.IntVar(&options.Clients, "c", 1, "number of clients")
-	flag.IntVar(&options.Pipeline, "pipeline", 1, "number of pipelined requests")
-	flag.IntVar(&options.Keymin, "keymin", 0, "minimum key range")
-	flag.IntVar(&options.Keymax, "keymax", 10, "maximum key range")
-	flag.IntVar(&options.Objsz, "sz", 128, "object data size")
-	flag.IntVar(&options.Datashard, "d", 4, "number of data shards for RS erasure coding")
-	flag.IntVar(&options.Parityshard, "p", 2, "number of parity shards for RS erasure coding")
-	flag.IntVar(&options.ECmaxgoroutine, "g", 32, "max number of goroutines for RS erasure coding")
-	flag.BoolVar(&options.Decoding, "dec", false, "do decoding after Receive()?")
-	flag.IntVar(&options.Op, "op", 0, "operation type")
-	flag.BoolVar(&options.Printlog, "log", true, "print debugging log?")
-	flag.StringVar(&options.File, "file", "", "print result to file")
-	flag.Int64Var(&options.Interval, "i", 0, "interval for every req (ms)")
-	flag.StringVar(&options.ClientLib, "cli", CLIENT_INFINICACHE, "client lib, try \"redis\", \"s3\", \"elasticache\",")
-	flag.StringVar(&options.ClientBase, "cli-base", "", "Bucket for s3 client. Base path for file based client.")
+	flag.IntVar(&options.Requests, "n", 10, "Number of requests.")
+	flag.IntVar(&options.Clients, "c", 1, "Number of clients.")
+	flag.IntVar(&options.Keymin, "keymin", 1, "Start postfix of generated keys. Generated key will be in the form of key_[keymin] ~ key_[keymax].")
+	flag.IntVar(&options.Keymax, "keymax", 10, "End postfix of generated keys.")
+	flag.IntVar(&options.Objsz, "sz", 128, "Object size in bytes.")
+	flag.IntVar(&options.Op, "op", 0, "Operation flag: 0 - SET (load the data store); 1 - GET.")
+	flag.StringVar(&options.ClientLib, "cli", CLIENT_INFINICACHE, "Client library, support \"infinistore\", \"redis\", \"s3\", \"elasticache\", \"fsx\", and \"efs.\"")
+	flag.StringVar(&options.AddrList, "addrlist", "127.0.0.1:6378", "Server addresses.")
+	flag.IntVar(&options.Datashard, "d", 4, "Number of data shards for RS erasure coding. Ignore if cli is not \"infinistore.\"")
+	flag.IntVar(&options.Parityshard, "p", 2, "Number of parity shards for RS erasure coding. Ignore if cli is not \"infinistore.\"")
+	flag.IntVar(&options.ECmaxgoroutine, "g", 32, "Max number of goroutines for RS erasure coding. Ignore if cli is not \"infinistore.\"")
+	flag.StringVar(&options.Bucket, "bucket", "", "S3 bucket name. Ignore if cli is not \"s3.\"")
+	flag.StringVar(&options.ClientBase, "cli-base", "", "Base path for file based client.")
+	flag.IntVar(&options.Pipeline, "pipeline", 1, "Number of pipelined requests")
+	flag.BoolVar(&options.Printlog, "log", true, "Print debugging log.")
+	flag.StringVar(&options.File, "file", "", "Print result to file.")
+	flag.Int64Var(&options.Interval, "i", 0, "Interval for every req (ms)")
 
 	flag.Parse()
 

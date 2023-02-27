@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ds2-lab/infinibench/simulator/readers"
 	"github.com/mason-leap-lab/go-utils/promise"
-	"github.com/wangaoone/redbench/simulator/readers"
 	"github.com/zhangjyr/hashmap"
 
 	"github.com/mason-leap-lab/go-utils/logger"

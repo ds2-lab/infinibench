@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	infinicache "github.com/mason-leap-lab/infinicache/client"
+	infinistore "github.com/ds2-lab/infinistore/client"
 	"github.com/zhangjyr/hashmap"
 )
 
@@ -57,14 +57,14 @@ func (d *Dummy) set(key string, val []byte) (err error) {
 	return nil
 }
 
-func (d *Dummy) get(key string) (infinicache.ReadAllCloser, error) {
+func (d *Dummy) get(key string) (infinistore.ReadAllCloser, error) {
 	size, ok := sizemap.Get(key)
 	if !ok {
-		return nil, infinicache.ErrNotFound
+		return nil, infinistore.ErrNotFound
 	}
 
 	if d.abbr == DummyCache && rand.Intn(100) < DummyCacheMissRatio {
-		return nil, infinicache.ErrNotFound
+		return nil, infinistore.ErrNotFound
 	}
 
 	if d.bandwidth == 0 {

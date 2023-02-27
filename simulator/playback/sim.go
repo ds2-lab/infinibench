@@ -41,17 +41,17 @@ import (
 	"github.com/ScottMansfield/nanolog"
 	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash"
+	"github.com/ds2-lab/infinibench/benchclient"
+	"github.com/ds2-lab/infinistore/client"
+	"github.com/ds2-lab/infinistore/proxy/global"
 	"github.com/dustin/go-humanize"
 	"github.com/mason-leap-lab/go-utils/logger"
 	"github.com/mason-leap-lab/go-utils/promise"
 	"github.com/mason-leap-lab/go-utils/sync"
-	"github.com/mason-leap-lab/infinicache/client"
-	"github.com/mason-leap-lab/infinicache/proxy/global"
-	"github.com/wangaoone/redbench/benchclient"
 
-	"github.com/wangaoone/redbench/simulator/playback/helpers"
-	"github.com/wangaoone/redbench/simulator/playback/proxy"
-	"github.com/wangaoone/redbench/simulator/readers"
+	"github.com/ds2-lab/infinibench/simulator/playback/helpers"
+	"github.com/ds2-lab/infinibench/simulator/playback/proxy"
+	"github.com/ds2-lab/infinibench/simulator/readers"
 )
 
 const (

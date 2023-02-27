@@ -4,9 +4,9 @@ import (
 	"errors"
 	"time"
 
+	infinistore "github.com/ds2-lab/infinistore/client"
+	"github.com/ds2-lab/infinistore/common/logger"
 	"github.com/google/uuid"
-	infinicache "github.com/mason-leap-lab/infinicache/client"
-	"github.com/mason-leap-lab/infinicache/common/logger"
 )
 
 const (
@@ -19,7 +19,7 @@ func resultFromError(err error) int {
 	switch err {
 	case nil:
 		return ResultSuccess
-	case infinicache.ErrNotFound:
+	case infinistore.ErrNotFound:
 		return ResultNotFound
 	default:
 		return ResultError
@@ -32,12 +32,12 @@ var (
 
 type Client interface {
 	EcSet(string, []byte, ...interface{}) (string, error)
-	EcGet(string, ...interface{}) (string, infinicache.ReadAllCloser, error)
+	EcGet(string, ...interface{}) (string, infinistore.ReadAllCloser, error)
 	Close()
 }
 
 type clientSetter func(string, []byte) error
-type clientGetter func(string) (infinicache.ReadAllCloser, error)
+type clientGetter func(string) (infinistore.ReadAllCloser, error)
 
 type defaultClient struct {
 	log    logger.ILogger
@@ -93,7 +93,7 @@ func (c *defaultClient) EcSet(key string, val []byte, args ...interface{}) (stri
 	return reqId, nil
 }
 
-func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinicache.ReadAllCloser, error) {
+func (c *defaultClient) EcGet(key string, args ...interface{}) (string, infinistore.ReadAllCloser, error) {
 	reqId := uuid.New().String()
 
 	var dryrun int

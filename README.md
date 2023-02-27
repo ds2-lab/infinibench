@@ -1,96 +1,59 @@
-# Redbench
-[![GoDoc](https://img.shields.io/badge/api-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/tidwall/redbench) 
+# InfiniBench
 
-Redbench is a Go package that allows for bootstrapping benchmarks
-for servers using a custom implementation of the Redis protocol. It provides
-the same inputs and outputs as the
-[redis-benchmark](https://redis.io/topics/benchmarks) tool. 
+InfiniBench is the benchmark toolkit and workload replayer for [InfiniStore](https://github.com/ds2-lab/infinistore) project.
 
-The purpose of this library is to provide benchmarking for 
-[Redcon](https://github.com/tidwall/redcon) compatible servers such as
-[Tile38](https://github.com/tidwall/tile38), but also works well for Redis
-operations that are not covered by the `redis-benchmark` tool such as the 
-`GEO*` commands, custom lua scripts, or [Redis Modules](http://antirez.com/news/106).
+## Benchmark
 
-## Getting Started
+To run the benchmark, execute:
 
-### Installing
+~~~
+go get
+make build
+bin/infinibench [options]
+~~~
 
-To start using Redbench, install Go and run `go get`:
+Useful options:
 
-```sh
-$ go get -u github.com/tidwall/redbench
-```
+~~~
+-n [NUMBER]: Number of requests.
+-c [NUMBER]: Number of concurrent clients.
+-keymin [NUMBER]: Start postfix of generated keys. Generated key will be in the form of key_[keymin] ~ key_[keymax].
+-keymax [NUMBER]: End postfix of generated keys.
+-sz [NUMBER]: Object size in bytes.
+-op [0 or 1]: Operation flag: 0 - SET (load the data store); 1 - GET.
+-cli: Client library, support "infinistore"(default), "redis", "s3", "elasticache", "fsx", and "efs".
+-addrlist [ADDR:PORT,...]: Server addresses.
+-d [NUMBER]: Number of data shards for RS erasure coding. Ignore if cli is not "infinistore".
+-p [NUMBER]: Number of parity shards for RS erasure coding. Ignore if cli is not "infinistore".
+-bucket: S3 bucket name, Ignore if cle is not "s3".
+-h: Print out help info.
+-i [NUMBER]: Interval for every request (ms)
+~~~
 
-This will retrieve the library.
+Example: command below will set 10 objects of size 1 MB from key_1 to key_10 using one concurrent client.
 
-### Example
+~~~
+bin/infinibench -n 10 -c 1 -keymin 1 -keymax 10 -sz 1048576 -d 10 -p 2 -op 0
+~~~
 
-The following example will run a benchmark for the `PING,SET,GET,GEOADD,GEORADIUS`
-commands on a server at 127.0.0.1:6379.
+## Simulation
 
-```go
-package main
+A sample of IBM docker registry trace is included. To run the simulation using sample trace:
 
-import (
-	"math/rand"
-	"strconv"
-	"time"
+~~~
+go get
+make simulate
+~~~
 
-	"github.com/tidwall/redbench"
-)
+## Replay
 
-func main() {
-	redbench.Bench("PING", "127.0.0.1:6379", nil, nil, func(buf []byte) []byte {
-		return redbench.AppendCommand(buf, "PING")
-	})
-	redbench.Bench("SET", "127.0.0.1:6379", nil, nil, func(buf []byte) []byte {
-		return redbench.AppendCommand(buf, "SET", "key:string", "val")
-	})
-	redbench.Bench("GET", "127.0.0.1:6379", nil, nil, func(buf []byte) []byte {
-		return redbench.AppendCommand(buf, "GET", "key:string")
-	})
-	rand.Seed(time.Now().UnixNano())
-	redbench.Bench("GEOADD", "127.0.0.1:6379", nil, nil, func(buf []byte) []byte {
-		return redbench.AppendCommand(buf, "GEOADD", "key:geo",
-			strconv.FormatFloat(rand.Float64()*360-180, 'f', 7, 64),
-			strconv.FormatFloat(rand.Float64()*170-85, 'f', 7, 64),
-			strconv.Itoa(rand.Int()))
-	})
-	redbench.Bench("GEORADIUS", "127.0.0.1:6379", nil, nil, func(buf []byte) []byte {
-		return redbench.AppendCommand(buf, "GEORADIUS", "key:geo",
-			strconv.FormatFloat(rand.Float64()*360-180, 'f', 7, 64),
-			strconv.FormatFloat(rand.Float64()*170-85, 'f', 7, 64),
-			"10", "km")
-	})
-}
-```
+To replay trace, run following command:
 
-Which is similar to executing:
-
-```
-$ redis-benchmark -t PING,SET,GET
-```
-
-For a more complete example, check out [tile38-benchmark](https://github.com/tidwall/tile38/blob/master/cmd/tile38-benchmark/main.go) from the [Tile38](https://github.com/tidwall/tile38) project.
-
-### Custom Options
-
-```go
-type Options struct {
-	Requests int
-	Clients  int
-	Pipeline int
-	Quiet    bool
-	CSV      bool
-	Stdout   io.Writer
-	Stderr   io.Writer
-}
-```
-
-## Contact
-Josh Baker [@tidwall](http://twitter.com/tidwall)
+~~~
+go get
+make build
+bin/playback [trace file]
+~~~
 
 ## License
-Redbench source code is available under the MIT [License](/LICENSE).
-
+InfiniBench source code is available under the MIT [License](/LICENSE).

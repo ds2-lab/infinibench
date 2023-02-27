@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
+	infinistore "github.com/ds2-lab/infinistore/client"
 	"github.com/go-redis/redis/v8"
-	infinicache "github.com/mason-leap-lab/infinicache/client"
 )
 
 var (
@@ -106,10 +106,10 @@ func (r *Redis) set(key string, val []byte) (err error) {
 	return r.backend.Set(context.Background(), key, val, 0).Err()
 }
 
-func (r *Redis) get(key string) (infinicache.ReadAllCloser, error) {
+func (r *Redis) get(key string) (infinistore.ReadAllCloser, error) {
 	val, err := r.backend.Get(context.Background(), key).Bytes()
 	if err == redis.Nil {
-		return nil, infinicache.ErrNotFound
+		return nil, infinistore.ErrNotFound
 	} else if err != nil {
 		return nil, err
 	} else {
